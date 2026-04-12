@@ -2379,45 +2379,13 @@ document.querySelectorAll('[data-filter-m]').forEach(btn => {
   });
 });
 
-// Bottom nav кнопки
-document.querySelectorAll('.mbn-btn[data-view]').forEach(btn => {
-  btn.addEventListener('click', () => mobileSetView(btn.dataset.view));
-});
+// Bottom nav кнопки — инициализируются в initMobileNav() после загрузки DOM
 
-// Загрузка Excel с мобильной кнопки
-const fileInputMobile = document.getElementById('fileInputMobile');
-if (fileInputMobile) {
-  fileInputMobile.addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!file.name.match(/\.xlsx?$/i)) {
-      showToast('error', 'Неверный формат', 'Поддерживаются только .xlsx и .xls');
-      this.value = ''; return;
-    }
-    parseExcel(file);
-    this.value = '';
-    // После загрузки — переходим на карту
-    setTimeout(() => mobileSetView('map'), 500);
-  });
-}
+// Загрузка Excel с мобильной кнопки — инициализируется в initMobileNav()
 
-// Закрытие sheet по клику на overlay
-document.getElementById('mobileSheetOverlay').addEventListener('click', () => {
-  mobileSetView('map');
-});
+// Закрытие sheet — инициализируется в initMobileNav()
 
-// Закрытие sheet свайпом вниз
-(function initSwipe() {
-  const handle = document.getElementById('mobileSheetHandle');
-  const sheet = document.getElementById('mobileSheet');
-  if (!handle || !sheet) return;
-  let startY = 0;
-  handle.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, {passive:true});
-  handle.addEventListener('touchend', e => {
-    const diff = e.changedTouches[0].clientY - startY;
-    if (diff > 60) mobileSetView('map'); // свайп вниз > 60px — закрыть
-  }, {passive:true});
-})();
+// Свайп — инициализируется в initMobileNav()
 
 // При обновлении данных — обновляем мобильный список если он открыт
 const _origRenderList = renderList;
@@ -2702,6 +2670,73 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     }
   });
 });
+
+// Мобильная навигация инициализируется после загрузки DOM
+// (HTML элементов мобильной навигации находятся ниже в файле)
+function initMobileNav() {
+  // Bottom nav кнопки
+  document.querySelectorAll('.mbn-btn[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => mobileSetView(btn.dataset.view));
+  });
+
+  // Загрузка Excel с мобильной кнопки
+  const fileInputMobile = document.getElementById('fileInputMobile');
+  if (fileInputMobile) {
+    fileInputMobile.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!file.name.match(/\.xlsx?$/i)) {
+        showToast('error', 'Неверный формат', 'Поддерживаются только .xlsx и .xls');
+        this.value = ''; return;
+      }
+      parseExcel(file);
+      this.value = '';
+      setTimeout(() => mobileSetView('map'), 500);
+    });
+  }
+
+  // Закрытие sheet по клику на overlay
+  const overlay = document.getElementById('mobileSheetOverlay');
+  if (overlay) overlay.addEventListener('click', () => mobileSetView('map'));
+
+  // Мобильный поиск
+  const searchMobile = document.getElementById('searchBoxMobile');
+  if (searchMobile) {
+    searchMobile.addEventListener('input', e => {
+      const term = e.target.value.toLowerCase();
+      document.querySelectorAll('#stationListMobile .station-item').forEach(item => {
+        const name = item.querySelector('.station-name')?.textContent.toLowerCase() || '';
+        item.style.display = name.includes(term) ? '' : 'none';
+      });
+    });
+  }
+
+  // Мобильные фильтры
+  document.querySelectorAll('[data-filter-m]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-filter-m]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const f = btn.dataset.filterM;
+      document.querySelectorAll('#stationListMobile .station-item').forEach((item, i) => {
+        const d = STATIONS_DATA[i];
+        if (!d) return;
+        const show = f === 'all' || (f === 'loaded' && d.loaded > 0) || (f === 'empty' && d.empty > 0);
+        item.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  // Свайп вниз по handle — закрыть sheet
+  const handle = document.getElementById('mobileSheetHandle');
+  const sheet = document.getElementById('mobileSheet');
+  if (handle && sheet) {
+    let startY = 0;
+    handle.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, {passive:true});
+    handle.addEventListener('touchend', e => {
+      if (e.changedTouches[0].clientY - startY > 60) mobileSetView('map');
+    }, {passive:true});
+  }
+}
 
 // ─── WHATSAPP MODULE ──────────────────────────────────────────────────────────
 const WA_KEY = 'railtrack_wa_config';
@@ -3030,8 +3065,6 @@ function waAutoSendAfterLoad() {
   },2000);
 }
 
-waInitModal();
-
 </script>
 <!-- MOBILE BOTTOM NAV -->
 <nav class="mobile-bottom-nav" id="mobileBottomNav">
@@ -3277,6 +3310,12 @@ waInitModal();
     </div>
   </div>
 </div>
+
+<script>
+// Инициализация после загрузки всего DOM
+waInitModal();
+initMobileNav();
+</script>
 
 </body>
 </html>
