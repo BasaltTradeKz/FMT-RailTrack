@@ -42,7 +42,7 @@
     background: var(--bg);
     padding: 20px 24px;
   }
-  #historyView.show { display: block; }
+  #historyView.show { display: flex; flex-direction: column; }
   #historyView::-webkit-scrollbar { width: 5px; }
   #historyView::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
@@ -1031,10 +1031,11 @@
       z-index: 1000;
       overflow-y: auto;
       padding: 12px;
-      display: none;
+      display: none !important;
+      flex-direction: column !important;
       background: var(--bg);
     }
-    #historyView.show { display: block !important; }
+    #historyView.show { display: flex !important; }
 
     /* Карточка станции — bottom sheet */
     .detail-panel {
@@ -2682,7 +2683,7 @@ function renderStationChart(stationName, chartRecords, labels) {
 // ── Nav tabs (desktop only) ───────────────────────────────────────────────────
 document.querySelectorAll('.nav-tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    if (isMobile()) return; // на мобиле — своя навигация
+    if (isMobile()) return;
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const view = tab.dataset.view;
@@ -2691,8 +2692,11 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
     if (view === 'map') {
       mapMain.style.display = 'flex';
       histView.classList.remove('show');
+      histView.style.display = 'none';
     } else {
       mapMain.style.display = 'none';
+      histView.style.display = 'flex';
+      histView.style.flexDirection = 'column';
       histView.classList.add('show');
       renderHistory();
     }
