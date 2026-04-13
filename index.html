@@ -1577,7 +1577,63 @@ function initStats() {
 }
 initStats();
 
-// ─── MAP ─────────────────────────────────────────────────────────────────────
+// ─── СЕРВЕРНЫЙ РЕЖИМ ─────────────────────────────────────────────────────────
+// Если заданы SERVER_URL и SERVER_KEY — данные загружаются автоматически с сервера
+// Вставьте адрес Cloudflare-туннеля и api_key после настройки сервера
+const SERVER_URL = 'https://and-portrait-demanding-armstrong.trycloudflare.com';   // например: 'https://railtrack.ВашДомен.workers.dev'
+const SERVER_KEY = 'railtrack-secret-key-2026';   // должен совпадать с API_KEY в server.py
+
+async function fetchFromServer() {
+  if (!SERVER_URL || !SERVER_KEY) return; // режим ручной загрузки — пропускаем
+
+  const badge = document.getElementById('unknownBadge');
+  badge.className = 'unknown-badge show';
+  badge.style.background = 'rgba(0,201,255,0.08)';
+  badge.style.borderColor = 'rgba(0,201,255,0.2)';
+  badge.style.color = 'var(--accent)';
+  badge.textContent = '🔄 Загружаю данные с сервера...';
+
+  try {
+    const resp = await fetch(`${SERVER_URL}/api/data`, {
+      headers: { 'X-Api-Key': SERVER_KEY }
+    });
+    if (!resp.ok) throw new Error(`Сервер вернул ${resp.status}`);
+    const data = await resp.json();
+    if (!data.stations || !data.meta) throw new Error('Неверный формат данных');
+
+    // Применяем координаты из справочника
+    const stations = data.stations.map(s => {
+      const coords = STATION_COORDS[s.name] || STATION_COORDS[s.name.toUpperCase()];
+      return coords
+        ? { ...s, lat: coords.lat, lon: coords.lon, country: coords.country || s.country }
+        : s;
+    }).filter(s => s.lat && s.lon);
+
+    updateDashboard(stations, data.meta.file_name || 'server', data.meta.total_wagons);
+
+    // Время обновления из сервера
+    if (data.meta.updated_at) {
+      const d = new Date(data.meta.updated_at);
+      document.getElementById('updateTime').textContent =
+        d.toLocaleDateString('ru') + ' — ' + d.toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'});
+    }
+
+    badge.className = 'unknown-badge';
+    showToast('success', 'Данные с сервера', `${data.meta.total_wagons} вагонов · ${stations.length} станций`);
+
+  } catch(e) {
+    badge.textContent = `⚠️ Сервер недоступен: ${e.message}. Загрузите Excel вручную.`;
+    showToast('warning', 'Сервер недоступен', 'Используйте кнопку «Загрузить Excel»');
+  }
+}
+
+// Автообновление каждые 5 минут если задан SERVER_URL
+if (SERVER_URL && SERVER_KEY) {
+  fetchFromServer();
+  setInterval(fetchFromServer, 5 * 60 * 1000);
+}
+
+
 const map = L.map('map', { zoomControl: true, attributionControl: false })
   .setView([42, 62], 5);
 
