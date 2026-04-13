@@ -1,0 +1,3377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Логистика — Карта вагонов</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  /* NAV TABS */
+  .nav-tabs {
+    display: flex;
+    gap: 2px;
+    margin-left: 20px;
+  }
+  .nav-tab {
+    padding: 6px 16px;
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* HISTORY VIEW */
+  #historyView {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg);
+    padding: 20px 24px;
+  }
+  #historyView.show { display: flex; flex-direction: column; }
+  #historyView::-webkit-scrollbar { width: 5px; }
+  #historyView::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .hist-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 60vh; gap: 12px; color: var(--muted);
+  }
+  .hist-empty-icon { font-size: 48px; opacity: 0.3; }
+  .hist-empty-title { font-size: 14px; font-weight: 700; }
+  .hist-empty-sub { font-size: 12px; }
+
+  .hist-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .hist-kpi-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .hist-kpi-icon { font-size: 24px; }
+  .hist-kpi-val { font-size: 28px; font-weight: 900; font-family: var(--mono); }
+  .hist-kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .hist-kpi-delta { font-size: 11px; font-family: var(--mono); margin-top: 2px; }
+  .delta-up { color: var(--red); }
+  .delta-down { color: var(--green); }
+  .delta-same { color: var(--muted); }
+
+  .hist-section { margin-bottom: 28px; }
+  .hist-section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .hist-section-title::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+  }
+  .chart-card-title {
+    font-size: 12px; font-weight: 700; margin-bottom: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .chart-card canvas { max-height: 220px; }
+
+  .hist-table-wrap { overflow-x: auto; }
+  table.hist-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 11px; font-family: var(--mono);
+  }
+  .hist-table th {
+    text-align: left; padding: 8px 10px;
+    color: var(--muted); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .hist-table td {
+    padding: 8px 10px; border-bottom: 1px solid rgba(31,45,69,0.4);
+    vertical-align: middle;
+  }
+  .hist-table tr:hover td { background: rgba(0,201,255,0.04); }
+  .hist-table .time-cell { color: var(--accent); font-weight: 600; }
+  .hist-table .num-cell { text-align: right; }
+
+  /* STATION HISTORY SELECTOR */
+  .station-select {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 8px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+  }
+  .station-select:focus { border-color: var(--accent); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #111827;
+    --panel2: #1a2235;
+    --border: #1f2d45;
+    --accent: #00c9ff;
+    --accent2: #f59e0b;
+    --green: #22c55e;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --font: 'Montserrat', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+  .logo {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text); }
+  .logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .logo-img {
+    height: 34px;
+    width: auto;
+    object-fit: contain;
+    display: block;
+  }
+  @media (max-width: 480px) {
+    .logo-img { height: 26px; }
+    .logo { font-size: 11px; }
+  }
+  .header-stats {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+  }
+  .hstat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .hstat strong { color: var(--text); font-size: 14px; }
+  .hstat .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .update-time {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .update-time span { color: var(--accent); }
+
+  /* LAYOUT */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    width: 340px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .search-box {
+    width: 100%;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .search-box:focus { border-color: var(--accent); }
+  .search-box::placeholder { color: var(--muted); }
+  .filters {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .filter-btn {
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--font);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+  .filter-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+  .idle-filters {
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .idle-label { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .idle-btns { display: flex; gap: 5px; }
+  .idle-btn {
+    flex: 1;
+    padding: 5px 0;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--muted);
+  }
+  .idle-btn.g { border-color: var(--green); color: var(--green); }
+  .idle-btn.y { border-color: var(--yellow); color: var(--yellow); }
+  .idle-btn.r { border-color: var(--red); color: var(--red); }
+  .idle-btn.active.g { background: var(--green); color: #000; }
+  .idle-btn.active.y { background: var(--yellow); color: #000; }
+  .idle-btn.active.r { background: var(--red); color: #fff; }
+  .station-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+  .station-list::-webkit-scrollbar { width: 4px; }
+  .station-list::-webkit-scrollbar-track { background: transparent; }
+  .station-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .station-item {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .station-item:hover { background: var(--panel2); }
+  .station-item.active { background: rgba(0, 201, 255, 0.08); border-left: 3px solid var(--accent); }
+  .station-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .station-info { flex: 1; min-width: 0; }
+  .station-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .station-sub { font-size: 10px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+  .station-badges { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--panel2);
+  }
+  .badge.wagons { color: var(--accent); border: 1px solid rgba(0,201,255,0.3); }
+  .badge.idle-g { color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .badge.idle-y { color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+  .badge.idle-r { color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+  /* MAP */
+  #map {
+    flex: 1;
+    background: #0d1526;
+  }
+
+  /* POPUP PANEL */
+  .detail-panel {
+    position: absolute;
+    top: 56px;
+    right: 0;
+    width: 380px;
+    height: calc(100% - 56px);
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    z-index: 900;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+  }
+  .detail-panel.open { transform: translateX(0); }
+  .dp-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .dp-close {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .dp-close:hover { color: var(--text); border-color: var(--accent); }
+  .dp-station { font-size: 16px; font-weight: 900; margin-bottom: 4px; }
+  .dp-country { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .dp-kpis {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .kpi {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .kpi-val { font-size: 20px; font-weight: 900; font-family: var(--mono); }
+  .kpi-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+  .dp-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px 16px;
+  }
+  .dp-table-wrap::-webkit-scrollbar { width: 4px; }
+  .dp-table-wrap::-webkit-scrollbar-thumb { background: var(--border); }
+  table.wagon-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .wagon-table th {
+    text-align: left;
+    padding: 6px 4px;
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .wagon-table td {
+    padding: 7px 4px;
+    border-bottom: 1px solid rgba(31,45,69,0.5);
+    font-family: var(--mono);
+    font-size: 11px;
+    vertical-align: middle;
+  }
+  .wagon-table tr:hover td { background: rgba(0,201,255,0.04); }
+  .status-pill {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .status-pill.loaded { background: rgba(245,158,11,0.15); color: var(--yellow); }
+  .status-pill.empty { background: rgba(100,116,139,0.15); color: var(--muted); }
+  .idle-cell { font-weight: 700; }
+  .idle-cell.g { color: var(--green); }
+  .idle-cell.y { color: var(--yellow); }
+  .idle-cell.r { color: var(--red); }
+
+  /* LEGEND */
+  .legend {
+    position: absolute;
+    bottom: 24px;
+    left: 360px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    z-index: 800;
+    font-size: 11px;
+  }
+  .legend-title { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 7px; }
+  .legend-item { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* UPLOAD BUTTON */
+  .upload-btn {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 5px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #fileInput { display: none; }
+
+  /* Leaflet overrides */
+  .leaflet-container { background: #0d1526 !important; }
+  .leaflet-tile { filter: brightness(0.6) saturate(0.4) hue-rotate(200deg); }
+  .leaflet-control-zoom a {
+    background: var(--panel) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-control-zoom a:hover { background: var(--panel2) !important; color: var(--accent) !important; }
+
+  /* TOAST */
+  #toast-container {
+    position: fixed; bottom: 24px; right: 24px;
+    z-index: 9999; display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    max-width: 340px;
+    display: flex; align-items: flex-start; gap: 10px;
+    animation: toastIn 0.25s ease;
+    box-shadow: 0 4px 20px #00000066;
+  }
+  .toast.success { border-color: var(--green); }
+  .toast.error { border-color: var(--red); }
+  .toast.info { border-color: var(--accent); }
+  .toast-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .toast-body { flex: 1; }
+  .toast-title { font-weight: 700; margin-bottom: 2px; }
+  .toast-msg { color: var(--muted); font-size: 11px; line-height: 1.4; }
+  @keyframes toastIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+
+  /* LOADING OVERLAY */
+  #loadingOverlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: #0a0e1acc;
+    z-index: 9998;
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px;
+  }
+  #loadingOverlay.show { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+
+  /* PARSE LOG */
+  #parseLog {
+    display: none;
+    background: var(--panel2);
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    flex-shrink: 0;
+    max-height: 90px;
+    overflow-y: auto;
+  }
+  #parseLog.show { display: block; }
+  #parseLog .log-line { margin-bottom: 3px; }
+  #parseLog .log-ok { color: var(--green); }
+  #parseLog .log-warn { color: var(--yellow); }
+  #parseLog .log-err { color: var(--red); }
+  .log-toggle {
+    background: none; border: none; color: var(--muted);
+    font-family: var(--mono); font-size: 10px; cursor: pointer;
+    padding: 4px 0; display: block; width: 100%; text-align: left;
+  }
+  .log-toggle:hover { color: var(--accent); }
+
+  /* UNKNOWN STATIONS BADGE */
+  .unknown-badge {
+    display: none;
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 10px;
+    color: var(--yellow);
+    font-family: var(--mono);
+    margin: 8px 16px 0;
+  }
+  .unknown-badge.show { display: block; }
+
+  /* WHATSAPP MODAL */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(10,14,26,0.85); z-index: 9990;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 560px; max-width: 95vw;
+    max-height: 90vh;
+    display: flex; flex-direction: column;
+    animation: toastIn 0.2s ease;
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+  .modal-header-icon { font-size: 20px; }
+  .modal-title { font-size: 14px; font-weight: 900; flex: 1; }
+  .modal-close {
+    background: var(--panel2); border: 1px solid var(--border);
+    color: var(--muted); cursor: pointer; width: 28px; height: 28px;
+    border-radius: 4px; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .modal-close:hover { color: var(--text); border-color: var(--accent); }
+  .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+  .modal-body::-webkit-scrollbar { width: 4px; }
+  .modal-body::-webkit-scrollbar-thumb { background: var(--border); }
+  .modal-footer {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 8px; justify-content: flex-end;
+    flex-shrink: 0;
+  }
+
+  /* TABS inside modal */
+  .modal-tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  .modal-tab {
+    padding: 7px 14px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); cursor: pointer; transition: all 0.15s; margin-bottom: -1px;
+  }
+  .modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .modal-tab-content { display: none; }
+  .modal-tab-content.active { display: block; }
+
+  /* Form controls */
+  .form-group { margin-bottom: 14px; }
+  .form-label {
+    display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin-bottom: 5px;
+  }
+  .form-input, .form-select, .form-textarea {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; color: var(--text);
+    font-family: var(--font); font-size: 12px; outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+  .form-input::placeholder, .form-textarea::placeholder { color: var(--muted); }
+  .form-textarea { resize: vertical; min-height: 80px; font-family: var(--mono); font-size: 11px; }
+  .form-select option { background: var(--panel2); }
+  .form-hint { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  /* Recipients list */
+  .recipients-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .recipient-row {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 10px;
+  }
+  .recipient-name { font-size: 12px; font-weight: 600; flex: 1; }
+  .recipient-phone { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .recipient-del {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 0 4px; transition: color 0.15s;
+  }
+  .recipient-del:hover { color: var(--red); }
+
+  /* Buttons */
+  .btn {
+    padding: 7px 16px; border-radius: 6px; font-family: var(--font);
+    font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s;
+    border: none; letter-spacing: 0.04em;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-secondary { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-green { background: var(--green); color: #000; }
+  .btn-green:hover { opacity: 0.85; }
+  .btn-sm { padding: 5px 10px; font-size: 10px; }
+
+  /* Provider cards */
+  .provider-cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .provider-card {
+    border: 2px solid var(--border); border-radius: 8px;
+    padding: 12px; text-align: center; cursor: pointer; transition: all 0.15s;
+  }
+  .provider-card:hover { border-color: var(--accent); }
+  .provider-card.selected { border-color: var(--accent); background: rgba(0,201,255,0.06); }
+  .provider-card-icon { font-size: 22px; margin-bottom: 5px; }
+  .provider-card-name { font-size: 11px; font-weight: 700; }
+  .provider-card-desc { font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+  /* Preview */
+  .msg-preview {
+    background: #1a2f1a; border: 1px solid #2d5a2d;
+    border-radius: 8px; padding: 12px 14px;
+    font-family: var(--mono); font-size: 11px; line-height: 1.6;
+    color: #c8f7c5; white-space: pre-wrap; word-break: break-word;
+    max-height: 200px; overflow-y: auto;
+  }
+
+  .info-box {
+    background: rgba(0,201,255,0.06); border: 1px solid rgba(0,201,255,0.2);
+    border-radius: 6px; padding: 10px 12px;
+    font-size: 11px; color: var(--text); line-height: 1.5; margin-bottom: 12px;
+  }
+  .info-box a { color: var(--accent); text-decoration: none; }
+  .info-box a:hover { text-decoration: underline; }
+  .warn-box {
+    background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
+    border-radius: 6px; padding: 10px 12px;
+    font-size: 11px; color: var(--text); line-height: 1.5; margin-bottom: 12px;
+  }
+  .step-list { counter-reset: steps; padding: 0; }
+  .step-item {
+    counter-increment: steps; display: flex; gap: 10px;
+    margin-bottom: 10px; font-size: 12px; line-height: 1.5;
+  }
+  .step-num {
+    background: var(--accent); color: #000; font-weight: 900; font-size: 10px;
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+  }
+
+  /* MANUAL GEO FORM */
+  .mgeo-row {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .mgeo-station { flex: 0 0 140px; min-width: 0; }
+  .mgeo-name { font-size: 12px; font-weight: 700; }
+  .mgeo-country { font-size: 10px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+  .mgeo-inputs { display: flex; gap: 6px; flex: 1; min-width: 200px; }
+  .mgeo-inputs .form-input { font-family: var(--mono); font-size: 12px; }
+  .mgeo-status { width: 20px; text-align: center; font-size: 16px; }
+  @media (max-width: 480px) {
+    .mgeo-station { flex: 0 0 100%; }
+    .mgeo-inputs { flex: 0 0 100%; }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     МОБИЛЬНАЯ АДАПТАЦИЯ  (≤ 480px)
+  ═══════════════════════════════════════════════════ */
+  @media (max-width: 480px) {
+
+    /* ── HEADER ─────────────────────────────────── */
+    header {
+      height: auto;
+      flex-wrap: wrap;
+      padding: 10px 14px;
+      gap: 8px;
+    }
+    .logo { font-size: 12px; }
+    .update-time { font-size: 10px; padding: 3px 7px; order: 2; }
+    .nav-tabs { margin-left: 0; order: 3; width: 100%; border-top: 1px solid var(--border); padding-top: 6px; }
+    .nav-tab { padding: 6px 14px; font-size: 10px; }
+    /* Скрываем hstat-блоки — оставляем только кнопки */
+    .hstat { display: none !important; }
+    .header-stats { margin-left: auto; gap: 6px; }
+    .upload-btn { font-size: 10px; padding: 7px 10px; min-height: 38px; }
+
+    /* ── ОСНОВНОЙ LAYOUT: карта сверху, список снизу ── */
+    .main { flex-direction: column; }
+    .sidebar {
+      width: 100%;
+      height: 42vh;
+      min-height: 180px;
+      border-right: none;
+      border-top: 1px solid var(--border);
+      order: 2;
+    }
+    #map { flex: none; height: 58vh; order: 1; }
+
+    /* ── САЙДБАР ────────────────────────────────── */
+    .sidebar-header { padding: 10px 12px 8px; }
+    .search-box { font-size: 14px; padding: 9px 10px; }
+    .filters { padding: 8px 12px; }
+    .filter-btn { padding: 7px 12px; font-size: 11px; min-height: 36px; }
+    .idle-btn { min-height: 36px; font-size: 10px; }
+    .station-item { padding: 12px 12px; min-height: 52px; }
+    .station-name { font-size: 13px; }
+
+    /* ── ЛЕГЕНДА — скрываем на мобиле (инфо занимает место) ── */
+    .legend { display: none; }
+
+    /* ── КАРТОЧКА СТАНЦИИ — выезжает снизу ──────── */
+    .detail-panel {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: 72vh;
+      border-left: none;
+      border-top: 2px solid var(--border);
+      border-radius: 18px 18px 0 0;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+    }
+    .detail-panel.open { transform: translateY(0); }
+    .detail-panel::before {
+      content: '';
+      display: block;
+      width: 44px; height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      margin: 10px auto -4px;
+    }
+    .dp-close { top: 16px; right: 14px; width: 34px; height: 34px; font-size: 16px; }
+    .dp-station { font-size: 15px; padding-right: 44px; }
+    .kpi-val { font-size: 17px; }
+    .dp-table-wrap { overflow-x: auto; }
+    .wagon-table { min-width: 360px; }
+
+    /* ── ИСТОРИЯ ────────────────────────────────── */
+    #historyView { padding: 12px; }
+    /* Исправляем высоту истории при переменной высоте хедера */
+    #historyView { min-height: calc(100vh - 110px); }
+    body { overflow: auto; height: auto; min-height: 100vh; }
+    .hist-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .hist-kpi-card { padding: 10px 12px; gap: 8px; }
+    .hist-kpi-val { font-size: 20px; }
+    .hist-kpi-icon { font-size: 18px; }
+    .two-col { grid-template-columns: 1fr; }
+    .chart-card { padding: 12px 10px; overflow-x: auto; }
+    /* Таблица журнала — скрываем лишние колонки */
+    .hist-table th:nth-child(n+5),
+    .hist-table td:nth-child(n+5) { display: none; }
+
+    /* ── WHATSAPP МОДАЛКА — из底部 ───────────────── */
+    .modal-overlay { align-items: flex-end; padding: 0; }
+    .modal {
+      width: 100%;
+      max-width: 100%;
+      height: 92vh;
+      max-height: 92vh;
+      border-radius: 18px 18px 0 0;
+    }
+    .modal-body { padding: 12px 14px; }
+    .modal-footer { padding: 10px 14px; flex-wrap: wrap; }
+    .modal-footer .btn { flex: 1; min-height: 42px; }
+    .provider-cards { grid-template-columns: 1fr; gap: 6px; }
+    .form-row { grid-template-columns: 1fr; gap: 8px; }
+    .modal-tabs { overflow-x: auto; white-space: nowrap; }
+    .modal-tab { padding: 7px 10px; font-size: 10px; }
+
+    /* ── TOAST ──────────────────────────────────── */
+    #toast-container { bottom: 12px; right: 10px; left: 10px; }
+    .toast { max-width: 100%; }
+  }
+
+  /* ── ПЛАНШЕТ (769–1024px) ───────────────────── */
+  @media (min-width: 481px) and (max-width: 768px) {
+    .sidebar { width: 280px; }
+    .detail-panel { width: 320px; }
+    .header-stats .hstat:nth-child(n+3) { display: none; }
+    .hist-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  }
+
+  /* ── ЭКРАН АВТОРИЗАЦИИ ──────────────────────────── */
+  #authScreen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    z-index: 99999;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+  }
+  #authScreen.hidden { display: none; }
+  .auth-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 36px 40px;
+    width: 360px;
+    max-width: 92vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: toastIn 0.3s ease;
+  }
+  .auth-logo {
+    font-size: 20px; font-weight: 900;
+    letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--accent); text-align: center;
+    margin-bottom: 6px;
+  }
+  .auth-logo span { color: var(--text); }
+  .auth-subtitle {
+    text-align: center; font-size: 11px;
+    color: var(--muted); margin-bottom: 28px;
+    font-family: var(--mono);
+  }
+  .auth-label {
+    display: block; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .auth-input {
+    width: 100%; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 11px 14px; color: var(--text);
+    font-family: var(--mono); font-size: 14px;
+    outline: none; transition: border-color 0.2s;
+    margin-bottom: 16px;
+  }
+  .auth-input:focus { border-color: var(--accent); }
+  .auth-btn {
+    width: 100%; padding: 12px;
+    background: var(--accent); border: none;
+    border-radius: 8px; color: #000;
+    font-family: var(--font); font-size: 13px;
+    font-weight: 900; letter-spacing: 0.05em;
+    cursor: pointer; transition: opacity 0.15s;
+    margin-top: 4px;
+  }
+  .auth-btn:hover { opacity: 0.85; }
+  .auth-error {
+    color: var(--red); font-size: 11px;
+    text-align: center; margin-top: 10px;
+    font-family: var(--mono); min-height: 16px;
+    animation: toastIn 0.2s ease;
+  }
+  .auth-hint {
+    text-align: center; font-size: 10px;
+    color: var(--muted); margin-top: 20px;
+    font-family: var(--mono); line-height: 1.5;
+  }
+
+  /* ── MOBILE BOTTOM NAV ──────────────────────────── */
+  .mobile-bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 60px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    z-index: 1100;
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .mbn-btn {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3px; background: none; border: none;
+    color: var(--muted); font-family: var(--font);
+    font-size: 9px; font-weight: 600;
+    letter-spacing: 0.04em; cursor: pointer;
+    transition: color 0.15s; padding: 6px 0;
+    text-transform: uppercase;
+  }
+  .mbn-btn.active { color: var(--accent); }
+  .mbn-btn svg { stroke: currentColor; transition: stroke 0.15s; }
+  .mbn-btn:active { background: rgba(255,255,255,0.04); }
+
+  /* ── MOBILE BOTTOM SHEET ────────────────────────── */
+  .mobile-sheet {
+    display: none;
+    position: fixed;
+    left: 0; right: 0; bottom: 60px;
+    height: 65vh;
+    background: var(--panel);
+    border-top: 2px solid var(--border);
+    border-radius: 18px 18px 0 0;
+    z-index: 1050;
+    transform: translateY(100%);
+    transition: transform 0.32s cubic-bezier(0.32,0.72,0,1);
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .mobile-sheet.open { transform: translateY(0); }
+  .mobile-sheet-handle {
+    width: 44px; height: 5px;
+    background: var(--border); border-radius: 3px;
+    margin: 10px auto 4px; flex-shrink: 0; cursor: grab;
+  }
+  .mobile-sheet-content {
+    display: flex; flex-direction: column;
+    flex: 1; overflow: hidden;
+  }
+  .mobile-sheet-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 1040;
+  }
+  .mobile-sheet-overlay.show { display: block; }
+
+  @media (max-width: 480px) {
+    .mobile-bottom-nav { display: flex; }
+    .mobile-sheet { display: flex; }
+
+    /* Хедер — компактный, только логотип + время */
+    header {
+      height: 48px !important;
+      padding: 0 14px !important;
+      flex-wrap: nowrap !important;
+      gap: 8px !important;
+    }
+    .nav-tabs { display: none !important; }
+    .header-stats { display: none !important; }
+    .update-time { margin-left: auto; font-size: 10px; }
+
+    /* Карта — весь экран между хедером и нижней навигацией */
+    body { overflow: hidden; }
+    .main {
+      flex-direction: row !important;
+      height: calc(100vh - 48px - 60px) !important;
+      overflow: hidden !important;
+      position: relative !important;
+    }
+    #map {
+      width: 100% !important;
+      height: 100% !important;
+      flex: 1 !important;
+      order: 0 !important;
+    }
+    .sidebar { display: none !important; }
+    .legend { display: none !important; }
+
+    /* История — поверх карты */
+    #historyView {
+      position: fixed !important;
+      top: 48px !important;
+      left: 0; right: 0;
+      bottom: 60px !important;
+      z-index: 1000;
+      overflow-y: auto;
+      padding: 12px;
+      display: none !important;
+      flex-direction: column !important;
+      background: var(--bg);
+    }
+    #historyView.show { display: flex !important; }
+
+    /* Карточка станции — bottom sheet */
+    .detail-panel {
+      position: fixed !important;
+      top: auto !important;
+      bottom: 60px !important;
+      left: 0 !important; right: 0 !important;
+      width: 100% !important;
+      height: 72vh !important;
+      border-left: none !important;
+      border-top: 2px solid var(--border);
+      border-radius: 18px 18px 0 0;
+      transform: translateY(100%) !important;
+      transition: transform 0.3s cubic-bezier(0.32,0.72,0,1) !important;
+      z-index: 1060;
+    }
+    .detail-panel.open { transform: translateY(0) !important; }
+    .detail-panel::before {
+      content: '';
+      display: block;
+      width: 44px; height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      margin: 10px auto -4px;
+    }
+
+    /* Toast выше нижней навигации */
+    #toast-container { bottom: 72px; }
+
+    /* Модалки */
+    .modal-overlay { align-items: flex-end; padding: 0; }
+    .modal {
+      width: 100%; max-width: 100%;
+      height: 92vh; max-height: 92vh;
+      border-radius: 18px 18px 0 0;
+      margin-bottom: 0;
+    }
+  }
+
+  @media (min-width: 481px) {
+    .mobile-bottom-nav { display: none !important; }
+    .mobile-sheet { display: none !important; }
+    .mobile-sheet-overlay { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="authScreen">
+  <div class="auth-card">
+    <div style="text-align:center;margin-bottom:10px">
+  <img src="data:image/png;base64,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" style="height:64px;width:auto;margin:0 auto;display:block" alt="Forte Meridian Trade">
+</div>
+<div class="auth-logo">RAIL<span>TRACK</span></div>
+    <div class="auth-subtitle">Система мониторинга полувагонов</div>
+    <label class="auth-label" for="authPassword">Пароль</label>
+    <input class="auth-input" id="authPassword" type="password"
+      placeholder="Введите пароль" autocomplete="current-password">
+    <button class="auth-btn" id="authSubmitBtn">Войти</button>
+    <div class="auth-error" id="authError"></div>
+    <div class="auth-hint">
+      Для получения доступа<br>обратитесь к администратору
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── АВТОРИЗАЦИЯ ──────────────────────────────────────────────────────────────
+// SHA-256 хэш пароля. Для смены пароля — замените хэш.
+// Текущий пароль: RailTrack2026
+// Сгенерировать новый хэш: https://emn178.github.io/online-tools/sha256.html
+const AUTH_HASH = 'f68e804d332ea79cde8f94acd41008c012748c4e235359f42575039bb64a800c';
+const AUTH_SESSION_KEY = 'railtrack_auth';
+const SESSION_HOURS = 8; // сессия живёт 8 часов
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function authCheckSession() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY) || 'null');
+    if (s && s.exp > Date.now()) return true;
+  } catch(e) {}
+  return false;
+}
+
+function authSaveSession() {
+  sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({
+    exp: Date.now() + SESSION_HOURS * 60 * 60 * 1000
+  }));
+}
+
+function authShow() {
+  document.getElementById('authScreen').classList.remove('hidden');
+}
+function authHide() {
+  document.getElementById('authScreen').classList.add('hidden');
+}
+
+async function authSubmit() {
+  const pw = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('authSubmitBtn');
+
+  if (!pw) { errEl.textContent = 'Введите пароль'; return; }
+
+  btn.textContent = '...'; btn.disabled = true;
+  const hash = await sha256(pw);
+  btn.textContent = 'Войти'; btn.disabled = false;
+
+  if (hash === AUTH_HASH) {
+    authSaveSession();
+    authHide();
+    errEl.textContent = '';
+  } else {
+    errEl.textContent = '❌ Неверный пароль';
+    document.getElementById('authPassword').value = '';
+    document.getElementById('authPassword').focus();
+  }
+}
+
+// Enter по нажатию клавиши
+document.getElementById('authPassword').addEventListener('keydown', e => {
+  if (e.key === 'Enter') authSubmit();
+});
+document.getElementById('authSubmitBtn').addEventListener('click', authSubmit);
+
+// Проверяем сессию при загрузке
+if (authCheckSession()) {
+  authHide();
+} else {
+  authShow();
+  setTimeout(() => document.getElementById('authPassword').focus(), 100);
+}
+</script>
+
+<!-- LOADING OVERLAY -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Обработка Excel...</div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div id="toast-container"></div>
+
+<header>
+  <div class="logo-wrap">
+  <img src="data:image/png;base64,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" class="logo-img" alt="Forte Meridian Trade">
+  <div class="logo">RAIL<span>TRACK</span></div>
+</div>
+  <div class="update-time">Выгрузка: <span id="updateTime">11.04.2026 — 16:43</span></div>
+  <nav class="nav-tabs">
+    <button class="nav-tab active" data-view="map">🗺 Карта</button>
+    <button class="nav-tab" data-view="history">📈 История</button>
+  </nav>
+  <div class="header-stats">
+    <div class="hstat"><div class="dot" style="background:var(--accent)"></div>Вагонов: <strong id="totalWagons">81</strong></div>
+    <div class="hstat"><div class="dot" style="background:var(--yellow)"></div>Гружёных: <strong id="totalLoaded">—</strong></div>
+    <div class="hstat"><div class="dot" style="background:var(--muted)"></div>Порожних: <strong id="totalEmpty">—</strong></div>
+    <div class="hstat"><div class="dot" style="background:var(--red)"></div>Макс.простой: <strong id="maxIdle">—</strong></div>
+    <label class="upload-btn">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Загрузить Excel
+      <input type="file" id="fileInput" accept=".xlsx,.xls">
+    </label>
+    <button class="upload-btn" id="waSettingsBtn" title="Настройки WhatsApp">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.555 4.126 1.526 5.856L0 24l6.335-1.502C8.01 23.445 9.975 24 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818c-1.87 0-3.618-.504-5.12-1.381l-.369-.219-3.76.892.952-3.653-.242-.378C2.727 15.457 2.182 13.786 2.182 12 2.182 6.58 6.58 2.182 12 2.182S21.818 6.58 21.818 12 17.42 21.818 12 21.818z"/></svg>
+      WhatsApp
+    </button>
+  </div>
+</header>
+
+<div class="main" style="position:relative;">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Станции (<span id="stationCount">18</span>)</div>
+      <input class="search-box" id="searchBox" type="text" placeholder="Поиск станции...">
+    </div>
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">Все</button>
+      <button class="filter-btn" data-filter="loaded">Гружёные</button>
+      <button class="filter-btn" data-filter="empty">Порожние</button>
+    </div>
+    <div class="idle-filters">
+      <div class="idle-label">Простой</div>
+      <div class="idle-btns">
+        <button class="idle-btn g" data-idle="green">🟢 0–2 дня</button>
+        <button class="idle-btn y" data-idle="yellow">🟡 3–5 дней</button>
+        <button class="idle-btn r" data-idle="red">🔴 6+ дней</button>
+      </div>
+    </div>
+    <div class="station-list" id="stationList"></div>
+    <div class="unknown-badge" id="unknownBadge"></div>
+    <button class="log-toggle" id="logToggle" style="display:none;padding:6px 16px;">▶ Лог обработки</button>
+    <div id="parseLog"></div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-title">Простой</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> 0–2 дня</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> 3–5 дней</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> 6+ дней</div>
+    <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:7px;" class="legend-title">Размер = кол-во вагонов</div>
+  </div>
+
+  <!-- DETAIL PANEL -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="dp-header">
+      <button class="dp-close" id="dpClose">✕</button>
+      <div class="dp-station" id="dpStation">—</div>
+      <div class="dp-country" id="dpCountry">—</div>
+    </div>
+    <div class="dp-kpis">
+      <div class="kpi">
+        <div class="kpi-val" id="dpWagons" style="color:var(--accent)">—</div>
+        <div class="kpi-label">Вагонов</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" id="dpMaxIdle">—</div>
+        <div class="kpi-label">Макс.дней</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" id="dpAvgIdle">—</div>
+        <div class="kpi-label">Ср.дней</div>
+      </div>
+    </div>
+    <div class="dp-table-wrap">
+      <table class="wagon-table">
+        <thead>
+          <tr>
+            <th>№ вагона</th>
+            <th>Статус</th>
+            <th>Простой</th>
+            <th>Подразделение</th>
+          </tr>
+        </thead>
+        <tbody id="dpTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY VIEW -->
+<div id="historyView">
+  <div id="histEmpty" class="hist-empty">
+    <div class="hist-empty-icon">📊</div>
+    <div class="hist-empty-title">История пока пуста</div>
+    <div class="hist-empty-sub">Загрузите Excel-файлы — каждая выгрузка будет сохраняться здесь</div>
+  </div>
+  <div id="histContent" style="display:none">
+
+    <!-- KPI Row -->
+    <div class="hist-section">
+      <div class="hist-section-title">Сводка по последним выгрузкам</div>
+      <div class="hist-grid" id="histKpiGrid"></div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="hist-section">
+      <div class="hist-section-title">Динамика по времени</div>
+      <div class="two-col">
+        <div class="chart-card">
+          <div class="chart-card-title">
+            <span>Всего вагонов (утро/вечер)</span>
+          </div>
+          <canvas id="chartTotal"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title">
+            <span>Макс. простой (дней)</span>
+          </div>
+          <canvas id="chartIdle"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Per-station chart -->
+    <div class="hist-section">
+      <div class="hist-section-title">Динамика по станции</div>
+      <div class="chart-card">
+        <div class="chart-card-title">
+          <span>Вагонов на станции</span>
+          <select class="station-select" id="stationSelect"></select>
+        </div>
+        <canvas id="chartStation" style="max-height:180px"></canvas>
+      </div>
+    </div>
+
+    <!-- History table -->
+    <div class="hist-section">
+      <div class="hist-section-title">Журнал выгрузок</div>
+      <div class="chart-card hist-table-wrap">
+        <table class="hist-table">
+          <thead>
+            <tr>
+              <th>Дата / время</th>
+              <th class="num-cell">Вагонов</th>
+              <th class="num-cell">Гружёных</th>
+              <th class="num-cell">Порожних</th>
+              <th class="num-cell">Станций</th>
+              <th class="num-cell">Макс.простой</th>
+              <th class="num-cell">Ср.простой</th>
+              <th>Файл</th>
+            </tr>
+          </thead>
+          <tbody id="histTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─── DATA ───────────────────────────────────────────────────────────────────
+const STATIONS_DATA = [
+  {
+    name: "АК-КУЛЬ", country: "Казахстан", lat: 51.503, lon: 71.949,
+    count: 1, max_idle: 0, avg_idle: 0, loaded: 0, empty: 1,
+    wagons: [
+      {num:"56566516", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ ВАГОНА В ПОЕЗД"}
+    ]
+  },
+  {
+    name: "АЛТЫН САХРА", country: "Туркменистан", lat: 38.47, lon: 56.28,
+    count: 2, max_idle: 3, avg_idle: 3, loaded: 0, empty: 2,
+    wagons: [
+      {num:"56612278", status:"порожний", idle:3, dept:"Ахангаран ПВ ахангаран аренда", op:"КОРРЕКТИРОВКА СВЕДЕНИЙ О ВАГОНЕ"},
+      {num:"56606742", status:"порожний", idle:3, dept:"Ахангаран ПВ ахангаран аренда", op:"КОРРЕКТИРОВКА СВЕДЕНИЙ О ВАГОНЕ"}
+    ]
+  },
+  {
+    name: "АСТАНА-1", country: "Казахстан", lat: 51.18, lon: 71.446,
+    count: 25, max_idle: 48, avg_idle: 9.56, loaded: 1, empty: 24,
+    wagons: [
+      {num:"56606429", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56566664", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56566458", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56565955", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56602576", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"61852372", status:"порожний", idle:45, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"56605645", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ОТПРАВЛЕНИЕ СО СТАНЦИИ"},
+      {num:"61852547", status:"порожний", idle:45, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"56605439", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56607237", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"61852364", status:"порожний", idle:48, dept:"Ахангаран ПВ ахангаран аренда", op:"ПОДАЧА ВАГОНА НА ПП"},
+      {num:"53418844", status:"порожний", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56926843", status:"порожний", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"61384715", status:"порожний", idle:0, dept:"Ахангаран ПВ Промлогистик", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56565716", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"61878534", status:"порожний", idle:25, dept:"Ахангаран ПВ ТРЕК ППС", op:"УБОРКА ВАГОНА С ПП"},
+      {num:"56603004", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"61852414", status:"порожний", idle:25, dept:"Ахангаран ПВ ТРЕК ППС", op:"УБОРКА ВАГОНА С ПП"},
+      {num:"56565849", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"61852406", status:"порожний", idle:25, dept:"Ахангаран ПВ ТРЕК ППС", op:"УБОРКА ВАГОНА С ПП"},
+      {num:"56611775", status:"порожний", idle:1, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"53418786", status:"порожний", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56948318", status:"порожний", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"53593307", status:"порожний", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"61852356", status:"порожний", idle:25, dept:"Ахангаран ПВ ТРЕК ППС", op:"УБОРКА ВАГОНА С ПП"}
+    ]
+  },
+  {
+    name: "БЕКОБОД", country: "Узбекистан", lat: 40.226, lon: 69.276,
+    count: 3, max_idle: 25, avg_idle: 19.67, loaded: 0, empty: 3,
+    wagons: [
+      {num:"56603889", status:"порожний", idle:22, dept:"Ахангаран ПВ ахангаран аренда", op:"ПОДГОТОВКА НА СПВ (СДАЧА С ДОРОГИ)"},
+      {num:"56603707", status:"порожний", idle:12, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА ВАГОНА С ГОСУДАРСТВА"},
+      {num:"56603343", status:"порожний", idle:25, dept:"Ахангаран ПВ ахангаран аренда", op:"ПОДГОТОВКА НА СПВ (СДАЧА С ДОРОГИ)"}
+    ]
+  },
+  {
+    name: "БЕРЕКЕТ", country: "Туркменистан", lat: 39.273, lon: 55.521,
+    count: 4, max_idle: 0, avg_idle: 0, loaded: 4, empty: 0,
+    wagons: [
+      {num:"56606759", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"КОРРЕКТИРОВКА СВЕДЕНИЙ О ВАГОНЕ"},
+      {num:"53576468", status:"гружёный", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56915424", status:"гружёный", idle:0, dept:"Ахангаран ПВ евразия", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56605868", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"КОРРЕКТИРОВКА СВЕДЕНИЙ О ВАГОНЕ"}
+    ]
+  },
+  {
+    name: "ГАЛАЙМОР", country: "Туркменистан", lat: 37.85, lon: 60.37,
+    count: 3, max_idle: 0, avg_idle: 0, loaded: 0, empty: 3,
+    wagons: [
+      {num:"56296601", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56604028", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"},
+      {num:"56605926", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВКЛЮЧЕНИЕ В ПОЕЗД"}
+    ]
+  },
+  {
+    name: "ГУЛАНЛЫ", country: "Туркменистан", lat: 40.07, lon: 58.00,
+    count: 5, max_idle: 0, avg_idle: 0, loaded: 0, empty: 5,
+    wagons: [
+      {num:"56602287", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56566375", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56601644", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56566649", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56354632", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "ДЖИЗАК", country: "Узбекистан", lat: 40.123, lon: 67.842,
+    count: 7, max_idle: 2, avg_idle: 1.43, loaded: 6, empty: 1,
+    wagons: [
+      {num:"61034609", status:"гружёный", idle:2, dept:"Ахангаран ПВ Адима зерно", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56602022", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ПРИБЫТИЕ НА СТАНЦИЮ"},
+      {num:"56566573", status:"гружёный", idle:2, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56296247", status:"гружёный", idle:2, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56606031", status:"гружёный", idle:2, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56478944", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ВЫГРУЗКА НА МЕСТАХ ОБЩ.ПОЛЬЗОВАНИЯ"},
+      {num:"56607203", status:"гружёный", idle:2, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "ЖАНАОЗЕН", country: "Казахстан", lat: 43.338, lon: 52.862,
+    count: 1, max_idle: 0, avg_idle: 0, loaded: 1, empty: 0,
+    wagons: [
+      {num:"56915168", status:"гружёный", idle:0, dept:"Ахангаран ПВ евразия", op:"ОТПРАВЛЕНИЕ СО СТАНЦИИ"}
+    ]
+  },
+  {
+    name: "ИМАМНАЗАР", country: "Туркменистан", lat: 37.27, lon: 66.61,
+    count: 3, max_idle: 4, avg_idle: 2.67, loaded: 3, empty: 0,
+    wagons: [
+      {num:"56566243", status:"гружёный", idle:4, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА НА ИНОСТРАННУЮ Ж.Д."},
+      {num:"56606635", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56565773", status:"гружёный", idle:4, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА НА ИНОСТРАННУЮ Ж.Д."}
+    ]
+  },
+  {
+    name: "КАРШИ", country: "Узбекистан", lat: 38.864, lon: 65.79,
+    count: 3, max_idle: 14, avg_idle: 6.67, loaded: 0, empty: 3,
+    wagons: [
+      {num:"56601982", status:"порожний", idle:2, dept:"Ахангаран ПВ ахангаран аренда", op:"ИЗ НЕИСПРАВНЫХ В РП"},
+      {num:"56606270", status:"порожний", idle:14, dept:"Ахангаран ПВ ахангаран аренда", op:"ИЗ НЕИСПРАВНЫХ В РП"},
+      {num:"56601917", status:"порожний", idle:4, dept:"Ахангаран ПВ ахангаран аренда", op:"В НЕИСПРАВНЫЕ"}
+    ]
+  },
+  {
+    name: "МАНГИСТАУ", country: "Казахстан", lat: 43.688, lon: 51.148,
+    count: 1, max_idle: 0, avg_idle: 0, loaded: 1, empty: 0,
+    wagons: [
+      {num:"56605447", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "МАРЫ", country: "Туркменистан", lat: 37.593, lon: 61.836,
+    count: 1, max_idle: 0, avg_idle: 0, loaded: 0, empty: 1,
+    wagons: [
+      {num:"56566557", status:"порожний", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "ОХАНГАРОН", country: "Узбекистан", lat: 40.912, lon: 69.631,
+    count: 4, max_idle: 17, avg_idle: 12, loaded: 0, empty: 4,
+    wagons: [
+      {num:"61393062", status:"порожний", idle:17, dept:"Ахангаран ПВ Промлогистик", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56478936", status:"порожний", idle:12, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56602709", status:"порожний", idle:12, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56478878", status:"порожний", idle:7, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "СЕРХЕТАБАТ", country: "Туркменистан", lat: 35.287, lon: 62.348,
+    count: 13, max_idle: 12, avg_idle: 5.46, loaded: 4, empty: 9,
+    wagons: [
+      {num:"56296288", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56603301", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56296544", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56602238", status:"гружёный", idle:0, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56296429", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56606452", status:"гружёный", idle:12, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА НА ИНОСТРАННУЮ Ж.Д."},
+      {num:"56296809", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56606981", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56604382", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56607104", status:"гружёный", idle:7, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА НА ИНОСТРАННУЮ Ж.Д."},
+      {num:"56606510", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56296320", status:"порожний", idle:5, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56566367", status:"гружёный", idle:7, dept:"Ахангаран ПВ ахангаран аренда", op:"СДАЧА НА ИНОСТРАННУЮ Ж.Д."}
+    ]
+  },
+  {
+    name: "ТУРКМЕНАБАД II", country: "Туркменистан", lat: 39.083, lon: 63.569,
+    count: 2, max_idle: 15, avg_idle: 13, loaded: 0, empty: 2,
+    wagons: [
+      {num:"56606601", status:"порожний", idle:15, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"},
+      {num:"56566318", status:"порожний", idle:11, dept:"Ахангаран ПВ ахангаран аренда", op:"ИСКЛЮЧЕНИЕ ИЗ ПОЕЗДА"}
+    ]
+  },
+  {
+    name: "УШКУЛЫН", country: "Казахстан", lat: 43.52, lon: 52.17,
+    count: 2, max_idle: 144, avg_idle: 144, loaded: 0, empty: 2,
+    wagons: [
+      {num:"61878484", status:"порожний", idle:144, dept:"Ахангаран ПВ", op:"ПОДАЧА ВАГОНА НА ПП"},
+      {num:"61878476", status:"порожний", idle:144, dept:"Ахангаран ПВ ахангаран аренда", op:"ПОДАЧА ВАГОНА НА ПП"}
+    ]
+  },
+  {
+    name: "ХРОМТАУ", country: "Казахстан", lat: 50.263, lon: 58.444,
+    count: 1, max_idle: 1, avg_idle: 1, loaded: 1, empty: 0,
+    wagons: [
+      {num:"56607567", status:"гружёный", idle:1, dept:"Ахангаран ПВ ахангаран аренда", op:"ПРИБЫТИЕ НА СТАНЦИЮ"}
+    ]
+  }
+];
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
+function idleColor(days) {
+  if (days <= 2) return '#22c55e';
+  if (days <= 5) return '#f59e0b';
+  return '#ef4444';
+}
+function idleClass(days) {
+  if (days <= 2) return 'g';
+  if (days <= 5) return 'y';
+  return 'r';
+}
+function markerRadius(count) {
+  return Math.max(10, Math.min(36, 8 + count * 1.1));
+}
+
+// ─── INIT STATS ─────────────────────────────────────────────────────────────
+function initStats() {
+  const totalLoaded = STATIONS_DATA.reduce((s,d)=>s+d.loaded,0);
+  const totalEmpty = STATIONS_DATA.reduce((s,d)=>s+d.empty,0);
+  const maxIdle = Math.max(...STATIONS_DATA.map(d=>d.max_idle));
+  document.getElementById('totalLoaded').textContent = totalLoaded;
+  document.getElementById('totalEmpty').textContent = totalEmpty;
+  document.getElementById('maxIdle').textContent = maxIdle + 'д';
+}
+initStats();
+
+// ─── СЕРВЕРНЫЙ РЕЖИМ ─────────────────────────────────────────────────────────
+// Если заданы SERVER_URL и SERVER_KEY — данные загружаются автоматически с сервера
+// Вставьте адрес Cloudflare-туннеля и api_key после настройки сервера
+const SERVER_URL = 'https://and-portrait-demanding-armstrong.trycloudflare.com';   // например: 'https://railtrack.ВашДомен.workers.dev'
+const SERVER_KEY = 'railtrack-secret-key-2026';   // должен совпадать с API_KEY в server.py
+
+async function fetchFromServer() {
+  if (!SERVER_URL || !SERVER_KEY) return; // режим ручной загрузки — пропускаем
+
+  const badge = document.getElementById('unknownBadge');
+  badge.className = 'unknown-badge show';
+  badge.style.background = 'rgba(0,201,255,0.08)';
+  badge.style.borderColor = 'rgba(0,201,255,0.2)';
+  badge.style.color = 'var(--accent)';
+  badge.textContent = '🔄 Загружаю данные с сервера...';
+
+  try {
+    const resp = await fetch(`${SERVER_URL}/api/data`, {
+      headers: { 'X-Api-Key': SERVER_KEY }
+    });
+    if (!resp.ok) throw new Error(`Сервер вернул ${resp.status}`);
+    const data = await resp.json();
+    if (!data.stations || !data.meta) throw new Error('Неверный формат данных');
+
+    // Применяем координаты из справочника
+    const stations = data.stations.map(s => {
+      const coords = STATION_COORDS[s.name] || STATION_COORDS[s.name.toUpperCase()];
+      return coords
+        ? { ...s, lat: coords.lat, lon: coords.lon, country: coords.country || s.country }
+        : s;
+    }).filter(s => s.lat && s.lon);
+
+    updateDashboard(stations, data.meta.file_name || 'server', data.meta.total_wagons);
+
+    // Время обновления из сервера
+    if (data.meta.updated_at) {
+      const d = new Date(data.meta.updated_at);
+      document.getElementById('updateTime').textContent =
+        d.toLocaleDateString('ru') + ' — ' + d.toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'});
+    }
+
+    badge.className = 'unknown-badge';
+    showToast('success', 'Данные с сервера', `${data.meta.total_wagons} вагонов · ${stations.length} станций`);
+
+  } catch(e) {
+    badge.textContent = `⚠️ Сервер недоступен: ${e.message}. Загрузите Excel вручную.`;
+    showToast('warning', 'Сервер недоступен', 'Используйте кнопку «Загрузить Excel»');
+  }
+}
+
+// Автообновление каждые 5 минут если задан SERVER_URL
+if (SERVER_URL && SERVER_KEY) {
+  fetchFromServer();
+  setInterval(fetchFromServer, 5 * 60 * 1000);
+}
+
+
+const map = L.map('map', { zoomControl: true, attributionControl: false })
+  .setView([42, 62], 5);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18
+}).addTo(map);
+
+// ─── MARKERS ─────────────────────────────────────────────────────────────────
+const markers = {};
+let activeStation = null;
+
+function createMarker(d) {
+  const color = idleColor(d.max_idle);
+  const r = markerRadius(d.count);
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${r*2}px;height:${r*2}px;
+      border-radius:50%;
+      background:${color}22;
+      border:2px solid ${color};
+      display:flex;align-items:center;justify-content:center;
+      position:relative;cursor:pointer;
+      box-shadow:0 0 12px ${color}55;
+      transition:all 0.2s;
+    ">
+      <span style="
+        font-family:'Montserrat',sans-serif;font-weight:900;
+        font-size:${Math.max(9, Math.min(14, r*0.7))}px;
+        color:${color};
+        line-height:1;
+      ">${d.count}</span>
+      <div style="
+        position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);
+        background:#111827cc;border:1px solid #1f2d45;border-radius:3px;
+        padding:1px 5px;white-space:nowrap;
+        font-size:9px;font-family:'Montserrat',sans-serif;font-weight:700;
+        color:#e2e8f0;letter-spacing:0.05em;
+      ">${d.name}</div>
+    </div>`,
+    iconSize: [r*2, r*2],
+    iconAnchor: [r, r]
+  });
+  const m = L.marker([d.lat, d.lon], {icon}).addTo(map);
+  m.on('click', () => openDetail(d.name));
+  markers[d.name] = { marker: m, data: d, visible: true };
+}
+
+STATIONS_DATA.forEach(createMarker);
+
+// ─── SIDEBAR LIST ─────────────────────────────────────────────────────────────
+let statusFilter = 'all';
+let idleFilter = null;
+let searchTerm = '';
+
+function renderList() {
+  const list = document.getElementById('stationList');
+  list.innerHTML = '';
+  let visible = 0;
+  STATIONS_DATA.forEach(d => {
+    const matchSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchStatus = statusFilter === 'all'
+      || (statusFilter === 'loaded' && d.loaded > 0)
+      || (statusFilter === 'empty' && d.empty > 0);
+    const matchIdle = !idleFilter
+      || (idleFilter === 'green' && d.max_idle <= 2)
+      || (idleFilter === 'yellow' && d.max_idle >= 3 && d.max_idle <= 5)
+      || (idleFilter === 'red' && d.max_idle >= 6);
+
+    const show = matchSearch && matchStatus && matchIdle;
+    if (markers[d.name]) {
+      if (show) { markers[d.name].marker.addTo(map); }
+      else { map.removeLayer(markers[d.name].marker); }
+    }
+    if (!show) return;
+    visible++;
+    const color = idleColor(d.max_idle);
+    const ic = idleClass(d.max_idle);
+    const item = document.createElement('div');
+    item.className = 'station-item' + (activeStation === d.name ? ' active' : '');
+    item.dataset.name = d.name;
+    item.innerHTML = `
+      <div class="station-dot" style="background:${color};box-shadow:0 0 6px ${color}88"></div>
+      <div class="station-info">
+        <div class="station-name">${d.name}</div>
+        <div class="station-sub">${d.country} · ${d.loaded}г / ${d.empty}п</div>
+      </div>
+      <div class="station-badges">
+        <span class="badge wagons">${d.count}</span>
+        <span class="badge idle-${ic}">${d.max_idle}д</span>
+      </div>`;
+    item.addEventListener('click', () => {
+      openDetail(d.name);
+      map.flyTo([d.lat, d.lon], 8, {duration:1});
+    });
+    list.appendChild(item);
+  });
+  document.getElementById('stationCount').textContent = visible;
+}
+
+// ─── DETAIL PANEL ─────────────────────────────────────────────────────────────
+function openDetail(name) {
+  const d = STATIONS_DATA.find(s => s.name === name);
+  if (!d) return;
+  activeStation = name;
+  renderList();
+
+  document.getElementById('dpStation').textContent = d.name;
+  document.getElementById('dpCountry').textContent = d.country;
+  document.getElementById('dpWagons').textContent = d.count;
+
+  const maxEl = document.getElementById('dpMaxIdle');
+  maxEl.textContent = d.max_idle + 'д';
+  maxEl.style.color = idleColor(d.max_idle);
+
+  document.getElementById('dpAvgIdle').textContent = d.avg_idle.toFixed(1) + 'д';
+
+  const tbody = document.getElementById('dpTableBody');
+  const sorted = [...d.wagons].sort((a,b) => b.idle - a.idle);
+  tbody.innerHTML = sorted.map(w => `
+    <tr>
+      <td style="font-weight:700;color:var(--accent)">${w.num}</td>
+      <td><span class="status-pill ${w.status==='гружёный'?'loaded':'empty'}">${w.status}</span></td>
+      <td class="idle-cell ${idleClass(w.idle)}">${w.idle}</td>
+      <td style="color:var(--muted);font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${w.dept}">${w.dept.replace('Ахангаран ПВ ','')}</td>
+    </tr>`).join('');
+
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+document.getElementById('dpClose').addEventListener('click', () => {
+  document.getElementById('detailPanel').classList.remove('open');
+  activeStation = null;
+  renderList();
+});
+
+// ─── FILTERS ─────────────────────────────────────────────────────────────────
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    statusFilter = btn.dataset.filter;
+    renderList();
+  });
+});
+
+document.querySelectorAll('.idle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('active')) {
+      btn.classList.remove('active');
+      idleFilter = null;
+    } else {
+      document.querySelectorAll('.idle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      idleFilter = btn.dataset.idle;
+    }
+    renderList();
+  });
+});
+
+document.getElementById('searchBox').addEventListener('input', e => {
+  searchTerm = e.target.value;
+  renderList();
+});
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+renderList();
+
+// ─── STATION COORDINATES DICTIONARY ──────────────────────────────────────────
+const STATION_COORDS = {
+  "АК-КУЛЬ":         { lat: 51.503, lon: 71.949, country: "Казахстан" },
+  "АЛТЫН САХРА":     { lat: 38.47,  lon: 56.28,  country: "Туркменистан" },
+  "АСТАНА-1":        { lat: 51.18,  lon: 71.446, country: "Казахстан" },
+  "БЕКОБОД":         { lat: 40.226, lon: 69.276, country: "Узбекистан" },
+  "БЕРЕКЕТ":         { lat: 39.273, lon: 55.521, country: "Туркменистан" },
+  "ГАЛАЙМОР":        { lat: 37.85,  lon: 60.37,  country: "Туркменистан" },
+  "ГУЛАНЛЫ":         { lat: 40.07,  lon: 58.00,  country: "Туркменистан" },
+  "ДЖИЗАК":          { lat: 40.123, lon: 67.842, country: "Узбекистан" },
+  "ЖАНАОЗЕН":        { lat: 43.338, lon: 52.862, country: "Казахстан" },
+  "ИМАМНАЗАР":       { lat: 37.27,  lon: 66.61,  country: "Туркменистан" },
+  "КАРШИ":           { lat: 38.864, lon: 65.79,  country: "Узбекистан" },
+  "МАНГИСТАУ":       { lat: 43.688, lon: 51.148, country: "Казахстан" },
+  "МАРЫ":            { lat: 37.593, lon: 61.836, country: "Туркменистан" },
+  "ОХАНГАРОН":       { lat: 40.912, lon: 69.631, country: "Узбекистан" },
+  "СЕРХЕТАБАТ":      { lat: 35.287, lon: 62.348, country: "Туркменистан" },
+  "ТУРКМЕНАБАД II":  { lat: 39.083, lon: 63.569, country: "Туркменистан" },
+  "ТУРКМЕНАБАД":     { lat: 39.083, lon: 63.569, country: "Туркменистан" },
+  "УШКУЛЫН":         { lat: 43.52,  lon: 52.17,  country: "Казахстан" },
+  "ХРОМТАУ":         { lat: 50.263, lon: 58.444, country: "Казахстан" },
+  // Расширенный справочник
+  "ТАШКЕНТ":         { lat: 41.299, lon: 69.240, country: "Узбекистан" },
+  "САМАРКАНД":       { lat: 39.654, lon: 66.975, country: "Узбекистан" },
+  "БУХАРА":          { lat: 39.767, lon: 64.421, country: "Узбекистан" },
+  "НАВОИ":           { lat: 40.096, lon: 65.379, country: "Узбекистан" },
+  "АНДИЖАН":         { lat: 40.783, lon: 72.344, country: "Узбекистан" },
+  "ФЕРГАНА":         { lat: 40.386, lon: 71.787, country: "Узбекистан" },
+  "НАМАНГАН":        { lat: 41.000, lon: 71.668, country: "Узбекистан" },
+  "ТЕРМЕЗ":          { lat: 37.224, lon: 67.278, country: "Узбекистан" },
+  "НУКУС":           { lat: 42.463, lon: 59.607, country: "Узбекистан" },
+  "АЛМАТЫ":          { lat: 43.238, lon: 76.889, country: "Казахстан" },
+  "АЛМАТЫ-1":        { lat: 43.238, lon: 76.889, country: "Казахстан" },
+  "АЛМАТЫ-2":        { lat: 43.253, lon: 76.944, country: "Казахстан" },
+  "ШЫМКЕНТ":         { lat: 42.317, lon: 69.596, country: "Казахстан" },
+  "АКТОБЕ":          { lat: 50.284, lon: 57.167, country: "Казахстан" },
+  "АКТАУ":           { lat: 43.653, lon: 51.198, country: "Казахстан" },
+  "АТЫРАУ":          { lat: 47.119, lon: 51.880, country: "Казахстан" },
+  "ПАВЛОДАР":        { lat: 52.286, lon: 76.967, country: "Казахстан" },
+  "ПАВЛОДАР-ЮЖНЫЙ":  { lat: 52.24,  lon: 76.94,  country: "Казахстан" },
+  "УСТЬ-КАМЕНОГОРСК":{ lat: 49.948, lon: 82.628, country: "Казахстан" },
+  "КОСТАНАЙ":        { lat: 53.214, lon: 63.625, country: "Казахстан" },
+  "КЫЗЫЛОРДА":       { lat: 44.853, lon: 65.509, country: "Казахстан" },
+  "ТУРКЕСТАН":       { lat: 43.298, lon: 68.271, country: "Казахстан" },
+  "ЖЕЗКАЗГАН":       { lat: 47.797, lon: 67.714, country: "Казахстан" },
+  "БАЛХАШ":          { lat: 46.843, lon: 74.994, country: "Казахстан" },
+  "АШХАБАД":         { lat: 37.938, lon: 58.384, country: "Туркменистан" },
+  "МАРЫ-1":          { lat: 37.593, lon: 61.836, country: "Туркменистан" },
+  "ТУРКМЕНБАШИ":     { lat: 40.001, lon: 52.977, country: "Туркменистан" },
+  "ДАШОГУЗ":         { lat: 41.836, lon: 59.966, country: "Туркменистан" },
+  "БИШКЕК":          { lat: 42.871, lon: 74.594, country: "Кыргызстан" },
+  "БИШКЕК-2":        { lat: 42.871, lon: 74.594, country: "Кыргызстан" },
+  "ОШ":              { lat: 40.515, lon: 72.798, country: "Кыргызстан" },
+  "КАРАКОЛ":         { lat: 42.490, lon: 78.393, country: "Кыргызстан" },
+  "ЛУГОВАЯ":         { lat: 42.88,  lon: 73.24,  country: "Кыргызстан" },
+  "МАХРАМ":          { lat: 40.93,  lon: 71.72,  country: "Узбекистан" },
+  "БОЛАШАК":         { lat: 42.330, lon: 53.677, country: "Казахстан" },
+  "АШГАБАТ":         { lat: 37.909, lon: 58.417, country: "Туркменистан" },
+  "АШХАБАД":         { lat: 37.909, lon: 58.417, country: "Туркменистан" },
+  "ТОБОЛ":           { lat: 52.693, lon: 62.582, country: "Казахстан" },
+};
+
+const EMPTY_MARKER = 'ВАГОНЫ ЖЕЛЕЗНОДОРОЖНЫЕ ВСЯКИЕ, ПЕРЕВОЗИМЫЕ НА СВОИХ ОСЯХ';
+
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+function showToast(type, title, msg, duration = 4500) {
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+  const tc = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<div class="toast-icon">${icons[type]||'ℹ️'}</div>
+    <div class="toast-body"><div class="toast-title">${title}</div><div class="toast-msg">${msg}</div></div>`;
+  tc.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity 0.3s'; setTimeout(()=>t.remove(),300); }, duration);
+}
+
+// ─── PARSE LOG ────────────────────────────────────────────────────────────────
+const logLines = [];
+function addLog(type, msg) {
+  logLines.push({type, msg});
+}
+function renderLog() {
+  const el = document.getElementById('parseLog');
+  const toggle = document.getElementById('logToggle');
+  if (!logLines.length) return;
+  toggle.style.display = 'block';
+  el.innerHTML = logLines.map(l => `<div class="log-line log-${l.type}">${l.msg}</div>`).join('');
+}
+document.getElementById('logToggle').addEventListener('click', function() {
+  const el = document.getElementById('parseLog');
+  el.classList.toggle('show');
+  this.textContent = el.classList.contains('show') ? '▼ Лог обработки' : '▶ Лог обработки';
+});
+
+// ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
+function parseExcel(file) {
+  logLines.length = 0;
+  const overlay = document.getElementById('loadingOverlay');
+  const loadText = document.getElementById('loadingText');
+  overlay.classList.add('show');
+  loadText.textContent = 'Читаю Excel...';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      loadText.textContent = 'Парсинг данных...';
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+
+      addLog('ok', `✓ Файл: ${file.name}`);
+      addLog('ok', `✓ Лист: "${sheetName}", строк: ${rows.length}`);
+
+      // Validate required columns
+      const required = ['Подр/ваг', '№ ваг.', 'Ст. Операции', 'Назв.гр.', 'Простой'];
+      const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+      const missing = required.filter(c => !cols.includes(c));
+      if (missing.length) {
+        overlay.classList.remove('show');
+        showToast('error', 'Ошибка структуры файла', `Отсутствуют колонки: ${missing.join(', ')}`);
+        addLog('err', `✗ Отсутствуют колонки: ${missing.join(', ')}`);
+        renderLog();
+        return;
+      }
+      addLog('ok', `✓ Все обязательные колонки найдены`);
+
+      loadText.textContent = 'Обработка вагонов...';
+
+      // Process rows
+      let totalRows = 0, errorRows = 0;
+      const stationMap = {};
+      const unknownStations = new Set();
+
+      rows.forEach((row, i) => {
+        totalRows++;
+        const station = (row['Ст. Операции'] || '').toString().trim().toUpperCase();
+        const wagonNum = row['№ ваг.'];
+        const idle = parseFloat(row['Простой']) || 0;
+        const cargo = (row['Назв.гр.'] || '').toString().trim();
+        const dept = (row['Подр/ваг'] || '').toString().trim();
+
+        if (!station || !wagonNum) {
+          errorRows++;
+          addLog('warn', `⚠ Строка ${i+2}: пропущена (нет станции или номера вагона)`);
+          return;
+        }
+
+        const status = cargo === EMPTY_MARKER ? 'порожний' : 'гружёный';
+        const coords = STATION_COORDS[station];
+        if (!coords) unknownStations.add(station);
+
+        if (!stationMap[station]) {
+          stationMap[station] = {
+            name: station,
+            country: coords ? coords.country : (row['Сокр.назв.дор.ст/д'] || '—'),
+            lat: coords ? coords.lat : null,
+            lon: coords ? coords.lon : null,
+            count: 0, max_idle: 0, avg_idle: 0, loaded: 0, empty: 0,
+            wagons: [], _idleSum: 0
+          };
+        }
+        const s = stationMap[station];
+        s.count++;
+        s._idleSum += idle;
+        if (idle > s.max_idle) s.max_idle = idle;
+        if (status === 'гружёный') s.loaded++; else s.empty++;
+        s.wagons.push({
+          num: wagonNum.toString(),
+          status,
+          idle,
+          dept,
+          op: (row['Назв.оп/в'] || '').toString()
+        });
+      });
+
+      // Finalize avg
+      Object.values(stationMap).forEach(s => {
+        s.avg_idle = s.count > 0 ? s._idleSum / s.count : 0;
+      });
+
+      const allStations = Object.values(stationMap);
+      const mappedStations = allStations.filter(s => s.lat !== null);
+      const totalWagons = allStations.reduce((a,s) => a+s.count, 0);
+
+      addLog('ok', `✓ Вагонов обработано: ${totalWagons - errorRows}`);
+      addLog('ok', `✓ Уникальных станций: ${allStations.length}`);
+      addLog('ok', `✓ Станций на карте: ${mappedStations.length}`);
+      if (errorRows > 0) addLog('warn', `⚠ Пропущено строк: ${errorRows}`);
+      if (unknownStations.size > 0) {
+        unknownStations.forEach(s => addLog('warn', `⚠ Нет координат: ${s}`));
+      }
+
+      loadText.textContent = 'Обновляю карту...';
+
+      // Update UI — сначала показываем то что нашли
+      setTimeout(async () => {
+        updateDashboard(mappedStations, file.name, totalWagons);
+        overlay.classList.remove('show');
+        renderLog();
+
+        if (unknownStations.size > 0) {
+          // Запускаем геокодирование для неизвестных станций
+          const unknownList = [...unknownStations];
+          showToast('info', 'Поиск координат',
+            `Ищу координаты для ${unknownList.length} станций через OpenStreetMap...`);
+          await geocodeUnknownStations(unknownList, stationMap, file.name, totalWagons);
+        } else {
+          showToast('success', 'Excel загружен',
+            `${totalWagons} вагонов · ${mappedStations.length} станций · все станции найдены`);
+        }
+      }, 100);
+
+    } catch(err) {
+      overlay.classList.remove('show');
+      showToast('error', 'Ошибка парсинга', err.message);
+      addLog('err', `✗ ${err.message}`);
+      renderLog();
+    }
+  };
+  reader.onerror = () => {
+    overlay.classList.remove('show');
+    showToast('error', 'Ошибка чтения файла', 'Не удалось прочитать файл');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ─── UPDATE DASHBOARD ─────────────────────────────────────────────────────────
+function updateDashboard(newStations, fileName, totalWagons) {
+  // Clear existing markers
+  Object.values(markers).forEach(m => map.removeLayer(m.marker));
+  Object.keys(markers).forEach(k => delete markers[k]);
+
+  // Replace data
+  STATIONS_DATA.length = 0;
+  newStations.forEach(s => STATIONS_DATA.push(s));
+
+  // Save to history
+  historyAddRecord(fileName, newStations, totalWagons);
+
+  // Re-create markers
+  STATIONS_DATA.forEach(createMarker);
+
+  // Update header stats
+  const totalLoaded = STATIONS_DATA.reduce((s,d)=>s+d.loaded, 0);
+  const totalEmpty  = STATIONS_DATA.reduce((s,d)=>s+d.empty, 0);
+  const maxIdle     = Math.max(...STATIONS_DATA.map(d=>d.max_idle));
+
+  document.getElementById('totalWagons').textContent = totalWagons;
+  document.getElementById('totalLoaded').textContent = totalLoaded;
+  document.getElementById('totalEmpty').textContent  = totalEmpty;
+  document.getElementById('maxIdle').textContent     = maxIdle + 'д';
+
+  // Extract time from filename  e.g. "11_04_2026_16_43-..."
+  const timeMatch = fileName.match(/(\d{2})_(\d{2})_(\d{4})_(\d{2})_(\d{2})/);
+  if (timeMatch) {
+    const [,d,mo,y,h,mi] = timeMatch;
+    document.getElementById('updateTime').textContent = `${d}.${mo}.${y} — ${h}:${mi}`;
+  } else {
+    document.getElementById('updateTime').textContent = new Date().toLocaleString('ru');
+  }
+
+  // Reset filters & re-render list
+  activeStation = null;
+  statusFilter = 'all';
+  idleFilter = null;
+  searchTerm = '';
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter==='all'));
+  document.querySelectorAll('.idle-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('searchBox').value = '';
+  document.getElementById('detailPanel').classList.remove('open');
+
+  // Fit map to new bounds
+  if (STATIONS_DATA.length > 0) {
+    const bounds = L.latLngBounds(STATIONS_DATA.map(s => [s.lat, s.lon]));
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }
+
+  renderList();
+  // Auto-send WhatsApp notifications if configured
+  if (typeof waAutoSendAfterLoad === 'function') waAutoSendAfterLoad();
+}
+
+// ─── FILE INPUT ───────────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!file.name.match(/\.xlsx?$/i)) {
+    showToast('error', 'Неверный формат', 'Поддерживаются только файлы .xlsx и .xls');
+    this.value = '';
+    return;
+  }
+  parseExcel(file);
+  this.value = '';
+});
+
+// Drag & drop on map area
+const mapEl = document.getElementById('map');
+mapEl.addEventListener('dragover', e => { e.preventDefault(); mapEl.style.outline = '2px dashed var(--accent)'; });
+mapEl.addEventListener('dragleave', () => { mapEl.style.outline = ''; });
+mapEl.addEventListener('drop', e => {
+  e.preventDefault();
+  mapEl.style.outline = '';
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.match(/\.xlsx?$/i)) parseExcel(file);
+  else showToast('error', 'Неверный формат', 'Перетащите файл .xlsx или .xls');
+});
+
+// ─── GEOCODING MODULE ─────────────────────────────────────────────────────────
+// Кэш геокодирования в localStorage
+const GEO_CACHE_KEY = 'railtrack_geo_cache';
+
+function geoCacheLoad() {
+  try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function geoCacheSave(cache) {
+  try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache)); } catch(e) {}
+}
+function geoCacheSet(stationName, coords) {
+  const cache = geoCacheLoad();
+  cache[stationName.toUpperCase()] = coords;
+  geoCacheSave(cache);
+  // Также добавляем в рантайм-справочник STATION_COORDS
+  STATION_COORDS[stationName.toUpperCase()] = coords;
+  addLog('ok', `✓ Координаты сохранены: ${stationName} → ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`);
+}
+
+// При старте — загружаем кэш в справочник
+(function loadGeoCache() {
+  const cache = geoCacheLoad();
+  Object.entries(cache).forEach(([name, coords]) => {
+    if (!STATION_COORDS[name]) STATION_COORDS[name] = coords;
+  });
+})();
+
+// Nominatim запрос для одной станции
+async function nominatimSearch(stationName, country) {
+  // Пробуем несколько вариантов запроса
+  const countryHints = {
+    'Кзх': 'Kazakhstan', 'Казахстан': 'Kazakhstan',
+    'Узб': 'Uzbekistan',  'Узбекистан': 'Uzbekistan',
+    'Трк': 'Turkmenistan','Туркменистан': 'Turkmenistan',
+    'Кыр': 'Kyrgyzstan',  'Кыргызстан': 'Kyrgyzstan',
+  };
+  const countryEn = countryHints[country] || '';
+
+  const queries = [
+    `railway station ${stationName} ${countryEn}`,
+    `${stationName} railway ${countryEn}`,
+    `станция ${stationName} ${countryEn}`,
+    `${stationName} ${countryEn}`,
+  ];
+
+  for (const q of queries) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&accept-language=ru`;
+      const resp = await fetch(url, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'RailTrack/1.0' }
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        // Проверка — координаты должны быть в регионе ЦА (грубая bbox)
+        if (lat >= 30 && lat <= 60 && lon >= 45 && lon <= 90) {
+          return { lat, lon, country: country || '—', source: 'nominatim' };
+        }
+      }
+    } catch(e) { /* сеть недоступна */ }
+    await new Promise(r => setTimeout(r, 1100)); // rate limit Nominatim: 1 req/sec
+  }
+  return null;
+}
+
+// Главная функция: геокодируем список, затем показываем форму для тех что не нашлись
+async function geocodeUnknownStations(unknownList, stationMap, fileName, totalWagons) {
+  const notFound = [];
+  let foundCount = 0;
+
+  for (const stationName of unknownList) {
+    const stData = stationMap[stationName];
+    const country = stData ? stData.country : '—';
+
+    // Показываем прогресс в бейдже
+    const badge = document.getElementById('unknownBadge');
+    badge.className = 'unknown-badge show';
+    badge.textContent = `🔍 Геокодирование: ${stationName}...`;
+
+    addLog('info' ,'🔍 Nominatim: ищу ' + stationName);
+
+    const coords = await nominatimSearch(stationName, country);
+
+    if (coords) {
+      // Нашли — сохраняем в кэш и добавляем маркер на карту
+      geoCacheSet(stationName, coords);
+      if (stData) {
+        stData.lat = coords.lat;
+        stData.lon = coords.lon;
+        stData.country = coords.country;
+        // Добавляем станцию в STATIONS_DATA и рисуем маркер
+        const existing = STATIONS_DATA.find(s => s.name === stationName);
+        if (!existing) {
+          STATIONS_DATA.push(stData);
+          createMarker(stData);
+          renderList();
+        }
+      }
+      foundCount++;
+      addLog('ok', `✓ Nominatim нашёл: ${stationName} → ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`);
+    } else {
+      notFound.push(stationName);
+      addLog('warn', `⚠ Nominatim не нашёл: ${stationName}`);
+    }
+  }
+
+  // Обновляем бейдж
+  const badge = document.getElementById('unknownBadge');
+  if (notFound.length === 0) {
+    badge.className = 'unknown-badge show';
+    badge.style.background = 'rgba(34,197,94,0.1)';
+    badge.style.borderColor = 'rgba(34,197,94,0.3)';
+    badge.style.color = 'var(--green)';
+    badge.textContent = `✅ Все станции найдены автоматически (+${foundCount})`;
+    showToast('success', 'Геокодирование завершено',
+      `Все ${foundCount} новых станций найдены через OpenStreetMap`);
+    setTimeout(() => { badge.className = 'unknown-badge'; }, 5000);
+  } else {
+    badge.className = 'unknown-badge show';
+    badge.textContent = `⚠ ${notFound.length} станций не найдено${foundCount > 0 ? ` (${foundCount} найдено автоматически)` : ''}`;
+    showToast('warning', 'Требуется ручной ввод',
+      `${notFound.length} станций не удалось найти: ${notFound.join(', ')}`);
+    // Показываем форму ручного ввода
+    setTimeout(() => showManualGeoForm(notFound, stationMap, fileName, totalWagons), 500);
+  }
+
+  renderLog();
+}
+
+// ─── МОДАЛЬНОЕ ОКНО РУЧНОГО ВВОДА КООРДИНАТ ───────────────────────────────────
+function showManualGeoForm(notFoundList, stationMap, fileName, totalWagons) {
+  const modal = document.getElementById('manualGeoModal');
+  const container = document.getElementById('manualGeoList');
+
+  container.innerHTML = notFoundList.map(name => {
+    const st = stationMap[name] || {};
+    return `
+    <div class="mgeo-row" id="mgeo-${name.replace(/\s/g,'_')}">
+      <div class="mgeo-station">
+        <div class="mgeo-name">${name}</div>
+        <div class="mgeo-country">${st.country || '—'} · ${st.count || 0} ваг.</div>
+      </div>
+      <div class="mgeo-inputs">
+        <input class="form-input mgeo-lat" placeholder="Широта (напр: 43.238)" type="number"
+          step="0.0001" min="30" max="60" data-station="${name}">
+        <input class="form-input mgeo-lon" placeholder="Долгота (напр: 76.889)" type="number"
+          step="0.0001" min="45" max="90" data-station="${name}">
+      </div>
+      <div class="mgeo-status" id="mgeo-status-${name.replace(/\s/g,'_')}"></div>
+    </div>`;
+  }).join('');
+
+  modal.classList.add('show');
+
+  // Кнопка сохранить всё
+  document.getElementById('manualGeoSaveBtn').onclick = () => {
+    let saved = 0, missing = 0;
+    notFoundList.forEach(name => {
+      const latEl = container.querySelector(`.mgeo-lat[data-station="${name}"]`);
+      const lonEl = container.querySelector(`.mgeo-lon[data-station="${name}"]`);
+      const statusEl = document.getElementById('mgeo-status-' + name.replace(/\s/g,'_'));
+      const lat = parseFloat(latEl?.value);
+      const lon = parseFloat(lonEl?.value);
+
+      if (!isNaN(lat) && !isNaN(lon) && lat >= 30 && lat <= 60 && lon >= 45 && lon <= 90) {
+        const stData = stationMap[name];
+        const coords = { lat, lon, country: stData?.country || '—', source: 'manual' };
+        geoCacheSet(name, coords);
+        if (stData) {
+          stData.lat = lat; stData.lon = lon;
+          if (!STATIONS_DATA.find(s => s.name === name)) {
+            STATIONS_DATA.push(stData);
+            createMarker(stData);
+          }
+        }
+        if (statusEl) {
+          statusEl.innerHTML = '<span style="color:var(--green)">✅</span>';
+        }
+        saved++;
+      } else if (latEl?.value || lonEl?.value) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)" title="Проверьте значения">❌</span>';
+        missing++;
+      } else {
+        // Пропустили — оставляем без координат
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">—</span>';
+      }
+    });
+
+    if (missing === 0) {
+      modal.classList.remove('show');
+      renderList();
+      if (saved > 0) {
+        showToast('success', 'Координаты сохранены',
+          `${saved} станций добавлено на карту. Координаты запомнены для следующих загрузок.`);
+        // Обновляем бейдж
+        const badge = document.getElementById('unknownBadge');
+        badge.className = 'unknown-badge';
+      }
+    } else {
+      showToast('error', 'Проверьте данные', `${missing} строк с неверными координатами`);
+    }
+  };
+
+  document.getElementById('manualGeoSkipBtn').onclick = () => {
+    modal.classList.remove('show');
+  };
+  document.getElementById('manualGeoCloseBtn').onclick = () => {
+    modal.classList.remove('show');
+  };
+}
+
+// ─── MOBILE NAVIGATION ───────────────────────────────────────────────────────
+const isMobile = () => window.innerWidth <= 480;
+
+function mobileSetView(view) {
+  if (!isMobile()) return;
+
+  // Сброс активных кнопок
+  document.querySelectorAll('.mbn-btn').forEach(b => b.classList.remove('active'));
+  const activeBtn = document.querySelector(`.mbn-btn[data-view="${view}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  const sheet = document.getElementById('mobileSheet');
+  const overlay = document.getElementById('mobileSheetOverlay');
+  const histView = document.getElementById('historyView');
+  const mainMap = document.querySelector('.main');
+
+  // Скрываем всё
+  sheet.classList.remove('open');
+  overlay.classList.remove('show');
+  histView.classList.remove('show');
+  mainMap.style.display = 'flex';
+
+  if (view === 'map') {
+    // Карта на весь экран
+    mainMap.style.display = 'flex';
+  } else if (view === 'list') {
+    // Открываем bottom sheet со списком
+    sheet.classList.add('open');
+    overlay.classList.add('show');
+    mobileRenderList();
+  } else if (view === 'history') {
+    // История на весь экран
+    histView.classList.add('show');
+    renderHistory();
+  }
+}
+
+// Синхронизируем мобильный список со статистикой
+function mobileRenderList() {
+  // Синхронизируем счётчики
+  const cnt = document.getElementById('stationCount');
+  const cntM = document.getElementById('stationCountMobile');
+  if (cntM && cnt) cntM.textContent = cnt.textContent;
+
+  const total = STATIONS_DATA.reduce((s,d) => s+d.count, 0);
+  const maxIdle = STATIONS_DATA.length ? Math.max(...STATIONS_DATA.map(d=>d.max_idle)) : 0;
+  const mTotal = document.getElementById('mobileTotal');
+  const mMax = document.getElementById('mobileMaxIdle');
+  if (mTotal) mTotal.textContent = total;
+  if (mMax) mMax.textContent = maxIdle;
+
+  // Рендерим список в мобильный контейнер
+  const mList = document.getElementById('stationListMobile');
+  if (!mList) return;
+  mList.innerHTML = '';
+  STATIONS_DATA.forEach(d => {
+    const color = idleColor(d.max_idle);
+    const ic = idleClass(d.max_idle);
+    const item = document.createElement('div');
+    item.className = 'station-item';
+    item.innerHTML = `
+      <div class="station-dot" style="background:${color};box-shadow:0 0 6px ${color}88"></div>
+      <div class="station-info">
+        <div class="station-name">${d.name}</div>
+        <div class="station-sub">${d.country} · ${d.loaded}г / ${d.empty}п</div>
+      </div>
+      <div class="station-badges">
+        <span class="badge wagons">${d.count}</span>
+        <span class="badge idle-${ic}">${d.max_idle}д</span>
+      </div>`;
+    item.addEventListener('click', () => {
+      // Закрываем sheet, открываем карточку станции
+      document.getElementById('mobileSheet').classList.remove('open');
+      document.getElementById('mobileSheetOverlay').classList.remove('show');
+      document.querySelector('.mbn-btn[data-view="map"]').classList.add('active');
+      document.querySelectorAll('.mbn-btn:not([data-view="map"])').forEach(b=>b.classList.remove('active'));
+      map.flyTo([d.lat, d.lon], 9, {duration: 0.8});
+      openDetail(d.name);
+    });
+    mList.appendChild(item);
+  });
+}
+
+// Мобильный поиск
+const searchMobile = document.getElementById('searchBoxMobile');
+if (searchMobile) {
+  searchMobile.addEventListener('input', e => {
+    const term = e.target.value.toLowerCase();
+    document.querySelectorAll('#stationListMobile .station-item').forEach(item => {
+      const name = item.querySelector('.station-name')?.textContent.toLowerCase() || '';
+      item.style.display = name.includes(term) ? '' : 'none';
+    });
+  });
+}
+
+// Мобильные фильтры
+document.querySelectorAll('[data-filter-m]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter-m]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const f = btn.dataset.filterM;
+    document.querySelectorAll('#stationListMobile .station-item').forEach((item, i) => {
+      const d = STATIONS_DATA[i];
+      if (!d) return;
+      const show = f === 'all' || (f === 'loaded' && d.loaded > 0) || (f === 'empty' && d.empty > 0);
+      item.style.display = show ? '' : 'none';
+    });
+  });
+});
+
+// Bottom nav кнопки — инициализируются в initMobileNav() после загрузки DOM
+
+// Загрузка Excel с мобильной кнопки — инициализируется в initMobileNav()
+
+// Закрытие sheet — инициализируется в initMobileNav()
+
+// Свайп — инициализируется в initMobileNav()
+
+// При обновлении данных — обновляем мобильный список если он открыт
+const _origRenderList = renderList;
+renderList = function() {
+  _origRenderList();
+  if (isMobile() && document.getElementById('mobileSheet').classList.contains('open')) {
+    mobileRenderList();
+  }
+};
+
+// ─── HISTORY MODULE ───────────────────────────────────────────────────────────
+// Хранение в localStorage под ключом 'railtrack_history'
+// Каждая запись: { ts, label, fileName, totalWagons, loaded, empty, stations, maxIdle, avgIdle, stationSnapshot }
+
+const HISTORY_KEY = 'railtrack_history';
+const MAX_HISTORY = 60; // хранить до 60 выгрузок (~30 дней)
+
+let chartTotal = null, chartIdle = null, chartStation = null;
+
+function historyLoad() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
+  catch { return []; }
+}
+function historySave(records) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(records)); } catch(e) {}
+}
+
+function historyAddRecord(fileName, stations, totalWagons) {
+  const records = historyLoad();
+  const now = new Date();
+
+  // Snapshot per station: { name, count, max_idle, avg_idle, loaded, empty }
+  const stationSnapshot = stations.map(s => ({
+    name: s.name, count: s.count,
+    max_idle: s.max_idle, avg_idle: parseFloat(s.avg_idle.toFixed(1)),
+    loaded: s.loaded, empty: s.empty
+  }));
+
+  const maxIdle = stationSnapshot.reduce((m,s) => Math.max(m, s.max_idle), 0);
+  const avgIdle = stationSnapshot.length > 0
+    ? parseFloat((stationSnapshot.reduce((s,r) => s + r.avg_idle, 0) / stationSnapshot.length).toFixed(1))
+    : 0;
+
+  const record = {
+    ts: now.toISOString(),
+    label: now.toLocaleString('ru', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }),
+    fileName,
+    totalWagons,
+    loaded: stationSnapshot.reduce((s,r) => s+r.loaded, 0),
+    empty:  stationSnapshot.reduce((s,r) => s+r.empty, 0),
+    stations: stationSnapshot.length,
+    maxIdle,
+    avgIdle,
+    stationSnapshot
+  };
+
+  records.unshift(record);
+  if (records.length > MAX_HISTORY) records.splice(MAX_HISTORY);
+  historySave(records);
+  return record;
+}
+
+// ── Chart helpers ─────────────────────────────────────────────────────────────
+const CHART_DEFAULTS = {
+  color: '#e2e8f0',
+  gridColor: 'rgba(31,45,69,0.8)',
+  font: { family: "'JetBrains Mono', monospace", size: 10 }
+};
+
+function makeLineChart(canvasId, labels, datasets) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { labels: { color: CHART_DEFAULTS.color, font: CHART_DEFAULTS.font, boxWidth: 12 } }
+      },
+      scales: {
+        x: {
+          ticks: { color: CHART_DEFAULTS.color, font: CHART_DEFAULTS.font, maxRotation: 35 },
+          grid: { color: CHART_DEFAULTS.gridColor }
+        },
+        y: {
+          ticks: { color: CHART_DEFAULTS.color, font: CHART_DEFAULTS.font },
+          grid: { color: CHART_DEFAULTS.gridColor },
+          beginAtZero: true
+        }
+      }
+    }
+  });
+}
+
+// ── Render history view ───────────────────────────────────────────────────────
+function renderHistory() {
+  const records = historyLoad();
+  const empty = document.getElementById('histEmpty');
+  const content = document.getElementById('histContent');
+
+  if (records.length === 0) {
+    empty.style.display = 'flex';
+    content.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  content.style.display = 'block';
+
+  // ── KPI cards (compare last two records) ──────────────────────────────────
+  const last = records[0];
+  const prev = records[1] || null;
+  const kpis = [
+    {
+      icon: '🚃', label: 'Вагонов', val: last.totalWagons,
+      delta: prev ? last.totalWagons - prev.totalWagons : null, invertColor: false
+    },
+    {
+      icon: '📦', label: 'Гружёных', val: last.loaded,
+      delta: prev ? last.loaded - prev.loaded : null, invertColor: false
+    },
+    {
+      icon: '⬜', label: 'Порожних', val: last.empty,
+      delta: prev ? last.empty - prev.empty : null, invertColor: false
+    },
+    {
+      icon: '⏱️', label: 'Макс. простой', val: last.maxIdle + 'д',
+      delta: prev ? last.maxIdle - prev.maxIdle : null, invertColor: true
+    },
+    {
+      icon: '📊', label: 'Ср. простой', val: last.avgIdle + 'д',
+      delta: prev ? parseFloat((last.avgIdle - prev.avgIdle).toFixed(1)) : null, invertColor: true
+    },
+    {
+      icon: '📍', label: 'Станций', val: last.stations,
+      delta: prev ? last.stations - prev.stations : null, invertColor: false
+    }
+  ];
+
+  const kpiGrid = document.getElementById('histKpiGrid');
+  kpiGrid.innerHTML = kpis.map(k => {
+    let deltaHtml = '';
+    if (k.delta !== null) {
+      const sign = k.delta > 0 ? '+' : '';
+      const cls = k.delta === 0 ? 'delta-same'
+        : (k.invertColor ? (k.delta > 0 ? 'delta-up' : 'delta-down')
+                         : (k.delta > 0 ? 'delta-up' : 'delta-down'));
+      deltaHtml = `<div class="hist-kpi-delta ${cls}">${sign}${k.delta} vs пред.</div>`;
+    }
+    return `<div class="hist-kpi-card">
+      <div class="hist-kpi-icon">${k.icon}</div>
+      <div>
+        <div class="hist-kpi-val">${k.val}</div>
+        <div class="hist-kpi-label">${k.label}</div>
+        ${deltaHtml}
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Prepare chart data (up to 20 last records, reversed = chronological) ──
+  const chartRecords = [...records].slice(0, 20).reverse();
+  const labels = chartRecords.map(r => r.label.replace(',', '\n'));
+
+  // ── Chart: total wagons ────────────────────────────────────────────────────
+  if (chartTotal) chartTotal.destroy();
+  chartTotal = makeLineChart('chartTotal', labels, [
+    {
+      label: 'Всего', data: chartRecords.map(r => r.totalWagons),
+      borderColor: '#00c9ff', backgroundColor: 'rgba(0,201,255,0.08)',
+      tension: 0.3, fill: true, pointRadius: 3
+    },
+    {
+      label: 'Гружёных', data: chartRecords.map(r => r.loaded),
+      borderColor: '#f59e0b', backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 3, borderDash: [4,3]
+    },
+    {
+      label: 'Порожних', data: chartRecords.map(r => r.empty),
+      borderColor: '#64748b', backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 3, borderDash: [4,3]
+    }
+  ]);
+
+  // ── Chart: max idle ────────────────────────────────────────────────────────
+  if (chartIdle) chartIdle.destroy();
+  chartIdle = makeLineChart('chartIdle', labels, [
+    {
+      label: 'Макс. дней', data: chartRecords.map(r => r.maxIdle),
+      borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)',
+      tension: 0.3, fill: true, pointRadius: 3
+    },
+    {
+      label: 'Ср. дней', data: chartRecords.map(r => r.avgIdle),
+      borderColor: '#f59e0b', backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 3
+    }
+  ]);
+
+  // ── Station select ─────────────────────────────────────────────────────────
+  const allStationNames = [...new Set(
+    records.flatMap(r => r.stationSnapshot.map(s => s.name))
+  )].sort();
+
+  const sel = document.getElementById('stationSelect');
+  const prevVal = sel.value;
+  sel.innerHTML = allStationNames.map(n =>
+    `<option value="${n}"${n===prevVal?' selected':''}>${n}</option>`
+  ).join('');
+
+  renderStationChart(sel.value || allStationNames[0], chartRecords, labels);
+
+  sel.onchange = () => renderStationChart(sel.value, chartRecords, labels);
+
+  // ── History table ─────────────────────────────────────────────────────────
+  const tbody = document.getElementById('histTableBody');
+  tbody.innerHTML = records.map((r, i) => {
+    const isLatest = i === 0;
+    return `<tr>
+      <td class="time-cell">${isLatest ? '🔴 ' : ''}${r.label}</td>
+      <td class="num-cell">${r.totalWagons}</td>
+      <td class="num-cell" style="color:var(--yellow)">${r.loaded}</td>
+      <td class="num-cell" style="color:var(--muted)">${r.empty}</td>
+      <td class="num-cell">${r.stations}</td>
+      <td class="num-cell" style="color:${idleColor(r.maxIdle)}">${r.maxIdle}д</td>
+      <td class="num-cell" style="color:${idleColor(r.avgIdle)}">${r.avgIdle}д</td>
+      <td style="color:var(--muted);font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.fileName}">${r.fileName}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderStationChart(stationName, chartRecords, labels) {
+  if (chartStation) chartStation.destroy();
+  const data = chartRecords.map(r => {
+    const s = r.stationSnapshot.find(x => x.name === stationName);
+    return s ? s.count : null;
+  });
+  const idleData = chartRecords.map(r => {
+    const s = r.stationSnapshot.find(x => x.name === stationName);
+    return s ? s.max_idle : null;
+  });
+  chartStation = makeLineChart('chartStation', labels, [
+    {
+      label: 'Вагонов', data,
+      borderColor: '#00c9ff', backgroundColor: 'rgba(0,201,255,0.1)',
+      tension: 0.3, fill: true, pointRadius: 4, yAxisID: 'y'
+    },
+    {
+      label: 'Макс.простой (д)', data: idleData,
+      borderColor: '#ef4444', backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 4, yAxisID: 'y2'
+    }
+  ]);
+  // Add second Y axis
+  chartStation.options.scales.y2 = {
+    position: 'right',
+    ticks: { color: '#ef4444', font: CHART_DEFAULTS.font },
+    grid: { drawOnChartArea: false },
+    beginAtZero: true
+  };
+  chartStation.update();
+}
+
+// ── Nav tabs (desktop only) ───────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (isMobile()) return;
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const view = tab.dataset.view;
+    const mapMain = document.querySelector('.main');
+    const histView = document.getElementById('historyView');
+    if (view === 'map') {
+      mapMain.style.display = 'flex';
+      histView.classList.remove('show');
+      histView.style.display = 'none';
+    } else {
+      mapMain.style.display = 'none';
+      histView.style.display = 'flex';
+      histView.style.flexDirection = 'column';
+      histView.classList.add('show');
+      renderHistory();
+    }
+  });
+});
+
+// Мобильная навигация инициализируется после загрузки DOM
+// (HTML элементов мобильной навигации находятся ниже в файле)
+function initMobileNav() {
+  // Bottom nav кнопки
+  document.querySelectorAll('.mbn-btn[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => mobileSetView(btn.dataset.view));
+  });
+
+  // Загрузка Excel с мобильной кнопки
+  const fileInputMobile = document.getElementById('fileInputMobile');
+  if (fileInputMobile) {
+    fileInputMobile.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!file.name.match(/\.xlsx?$/i)) {
+        showToast('error', 'Неверный формат', 'Поддерживаются только .xlsx и .xls');
+        this.value = ''; return;
+      }
+      parseExcel(file);
+      this.value = '';
+      setTimeout(() => mobileSetView('map'), 500);
+    });
+  }
+
+  // Закрытие sheet по клику на overlay
+  const overlay = document.getElementById('mobileSheetOverlay');
+  if (overlay) overlay.addEventListener('click', () => mobileSetView('map'));
+
+  // Мобильный поиск
+  const searchMobile = document.getElementById('searchBoxMobile');
+  if (searchMobile) {
+    searchMobile.addEventListener('input', e => {
+      const term = e.target.value.toLowerCase();
+      document.querySelectorAll('#stationListMobile .station-item').forEach(item => {
+        const name = item.querySelector('.station-name')?.textContent.toLowerCase() || '';
+        item.style.display = name.includes(term) ? '' : 'none';
+      });
+    });
+  }
+
+  // Мобильные фильтры
+  document.querySelectorAll('[data-filter-m]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-filter-m]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const f = btn.dataset.filterM;
+      document.querySelectorAll('#stationListMobile .station-item').forEach((item, i) => {
+        const d = STATIONS_DATA[i];
+        if (!d) return;
+        const show = f === 'all' || (f === 'loaded' && d.loaded > 0) || (f === 'empty' && d.empty > 0);
+        item.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  // Свайп вниз по handle — закрыть sheet
+  const handle = document.getElementById('mobileSheetHandle');
+  const sheet = document.getElementById('mobileSheet');
+  if (handle && sheet) {
+    let startY = 0;
+    handle.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, {passive:true});
+    handle.addEventListener('touchend', e => {
+      if (e.changedTouches[0].clientY - startY > 60) mobileSetView('map');
+    }, {passive:true});
+  }
+}
+
+// ─── WHATSAPP MODULE ──────────────────────────────────────────────────────────
+const WA_KEY = 'railtrack_wa_config';
+
+const WA_DEFAULT_SUMMARY = `🚃 *RAILTRACK — Отчёт {time} ({date})*
+
+📊 Всего вагонов: *{total}*
+📦 Гружёных: *{loaded}* | ⬜ Порожних: *{empty}*
+📍 Станций: *{stations}*
+⏱ Макс. простой: *{max_idle} дн.* | Ср: *{avg_idle} дн.*
+
+🔝 Топ станции:
+{top3}
+
+_Отправлено автоматически — RailTrack_`;
+
+const WA_DEFAULT_ALERT = `🔴 *АЛЕРТ — {station}*
+
+Вагонов: *{count}* | Макс. простой: *{max_idle} дн.*
+
+Вагоны:
+{wagons_list}
+
+⚠️ Требует внимания!`;
+
+function waLoadConfig() {
+  try { return JSON.parse(localStorage.getItem(WA_KEY) || 'null') || waDefaultConfig(); }
+  catch { return waDefaultConfig(); }
+}
+function waSaveConfig(cfg) {
+  try { localStorage.setItem(WA_KEY, JSON.stringify(cfg)); } catch(e) {}
+}
+function waDefaultConfig() {
+  return {
+    provider: 'callmebot',
+    twilio: { sid:'', token:'', from:'' },
+    waba: { phoneId:'', token:'' },
+    recipients: [],
+    tmplSummary: WA_DEFAULT_SUMMARY,
+    tmplAlert: WA_DEFAULT_ALERT,
+    alertThreshold: 10,
+    autoSend: 'both'
+  };
+}
+
+let waCfg = waLoadConfig();
+
+function waBuildSummary() {
+  if (!STATIONS_DATA.length) return 'Нет данных — сначала загрузите Excel';
+  const total   = STATIONS_DATA.reduce((s,d)=>s+d.count, 0);
+  const loaded  = STATIONS_DATA.reduce((s,d)=>s+d.loaded, 0);
+  const empty   = STATIONS_DATA.reduce((s,d)=>s+d.empty, 0);
+  const maxIdle = Math.max(...STATIONS_DATA.map(d=>d.max_idle));
+  const avgIdle = STATIONS_DATA.length
+    ? (STATIONS_DATA.reduce((s,d)=>s+d.avg_idle,0)/STATIONS_DATA.length).toFixed(1) : 0;
+  const now = new Date();
+  const date = now.toLocaleDateString('ru');
+  const time = now.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+  const top3 = [...STATIONS_DATA].sort((a,b)=>b.count-a.count).slice(0,3)
+    .map(s=>`  • ${s.name}: ${s.count} ваг. (макс.${s.max_idle}д)`).join('\n');
+  return (waCfg.tmplSummary || WA_DEFAULT_SUMMARY)
+    .replace(/{date}/g,date).replace(/{time}/g,time)
+    .replace(/{total}/g,total).replace(/{loaded}/g,loaded)
+    .replace(/{empty}/g,empty).replace(/{stations}/g,STATIONS_DATA.length)
+    .replace(/{max_idle}/g,maxIdle).replace(/{avg_idle}/g,avgIdle)
+    .replace(/{top3}/g,top3);
+}
+
+function waBuildAlerts() {
+  const threshold = parseInt(waCfg.alertThreshold) || 10;
+  return STATIONS_DATA.filter(s=>s.max_idle>=threshold).map(s=>{
+    const wagonList = [...s.wagons].sort((a,b)=>b.idle-a.idle).slice(0,5)
+      .map(w=>`  № ${w.num} — ${w.status}, ${w.idle}д`).join('\n');
+    return (waCfg.tmplAlert || WA_DEFAULT_ALERT)
+      .replace(/{station}/g,s.name).replace(/{count}/g,s.count)
+      .replace(/{max_idle}/g,s.max_idle).replace(/{wagons_list}/g,wagonList||'—');
+  });
+}
+
+async function waSendCallMeBot(phone, apiKey, message) {
+  const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(message)}&apikey=${apiKey}`;
+  try {
+    await fetch(url, {method:'GET', mode:'no-cors'});
+    return {ok:true};
+  } catch(e) { return {ok:false, error:e.message}; }
+}
+
+function waGeneratePythonScript() {
+  const recipients = waCfg.recipients.map(r=>
+    `    {"name": "${r.name}", "phone": "${r.phone}"}`).join(',\n');
+  const sid   = (waCfg.twilio&&waCfg.twilio.sid)   || 'ACxxxxxxxxxxxxxxxx';
+  const token = (waCfg.twilio&&waCfg.twilio.token) || 'xxxxxxxxxxxxxxxx';
+  const from  = (waCfg.twilio&&waCfg.twilio.from)  || '+14155238886';
+  const thresh= waCfg.alertThreshold || 10;
+  return `#!/usr/bin/env python3
+"""WhatsApp sender via Twilio
+Usage: python whatsapp_sender.py [--summary] [--alerts] [--data PATH]
+"""
+import sys,json,argparse,urllib.request,urllib.parse,base64
+from datetime import datetime
+
+TWILIO_SID="${sid}"
+TWILIO_TOKEN="${token}"
+TWILIO_FROM="whatsapp:${from}"
+ALERT_THRESHOLD=${thresh}
+
+RECIPIENTS=[
+${recipients||'    # {"name":"Алексей","phone":"+77001234567"}'}
+]
+
+def send_whatsapp(to,msg):
+    url=f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
+    data=urllib.parse.urlencode({"From":TWILIO_FROM,"To":f"whatsapp:{to}","Body":msg}).encode()
+    creds=base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+    req=urllib.request.Request(url,data=data,headers={"Authorization":f"Basic {creds}","Content-Type":"application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            res=json.loads(r.read())
+            print(f"  OK {to}: {res.get('sid','?')}")
+    except urllib.error.HTTPError as e:
+        print(f"  ERR {to}: {e.read().decode()}")
+
+def load_data(path):
+    try:
+        with open(path,encoding="utf-8") as f: return json.load(f)
+    except: print(f"File not found: {path}"); return []
+
+if __name__=="__main__":
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--summary",action="store_true")
+    ap.add_argument("--alerts",action="store_true")
+    ap.add_argument("--data",default="./downloads/latest_data.json")
+    args=ap.parse_args()
+    both=not args.summary and not args.alerts
+    stations=load_data(args.data)
+    if not stations: sys.exit(1)
+    if args.summary or both:
+        total=sum(s["count"]for s in stations)
+        msg=f"RAILTRACK {datetime.now().strftime('%d.%m.%Y %H:%M')}\\nВагонов: {total}, станций: {len(stations)}"
+        for r in RECIPIENTS: send_whatsapp(r["phone"],msg)
+    if args.alerts or both:
+        for s in stations:
+            if s["max_idle"]>=ALERT_THRESHOLD:
+                msg=f"АЛЕРТ {s['name']}: {s['count']} ваг., простой {s['max_idle']}д"
+                for r in RECIPIENTS: send_whatsapp(r["phone"],msg)
+`;
+}
+
+function waInitModal() {
+  document.querySelectorAll('.provider-card').forEach(card=>{
+    card.addEventListener('click',()=>{
+      document.querySelectorAll('.provider-card').forEach(c=>c.classList.remove('selected'));
+      card.classList.add('selected');
+      waCfg.provider=card.dataset.provider;
+      document.querySelectorAll('[id^="provider-"]').forEach(el=>el.style.display='none');
+      const el=document.getElementById('provider-'+card.dataset.provider);
+      if(el) el.style.display='block';
+      document.getElementById('callmebotKeySection').style.display=
+        card.dataset.provider==='callmebot'?'block':'none';
+    });
+  });
+  document.querySelectorAll('.modal-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+      document.querySelectorAll('.modal-tab').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.modal-tab-content').forEach(c=>c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-'+tab.dataset.tab).classList.add('active');
+      if(tab.dataset.tab==='send') waRenderSendTab();
+      if(tab.dataset.tab==='messages') waRefreshPreview();
+    });
+  });
+  document.getElementById('saveProviderBtn').addEventListener('click',()=>{
+    waCfg.twilio={sid:document.getElementById('twilioSid').value,token:document.getElementById('twilioToken').value,from:document.getElementById('twilioFrom').value};
+    waCfg.waba={phoneId:document.getElementById('wabaPhoneId').value,token:document.getElementById('wabaToken').value};
+    waCfg.tmplSummary=document.getElementById('tmplSummary').value;
+    waCfg.tmplAlert=document.getElementById('tmplAlert').value;
+    waCfg.alertThreshold=parseInt(document.getElementById('alertThreshold').value)||10;
+    waCfg.autoSend=document.getElementById('autoSend').value;
+    waSaveConfig(waCfg);
+    showToast('success','Настройки сохранены','WhatsApp-конфигурация обновлена');
+  });
+  document.getElementById('addRecipientBtn').addEventListener('click',()=>{
+    const name=document.getElementById('newRecipientName').value.trim();
+    const phone=document.getElementById('newRecipientPhone').value.trim();
+    if(!name||!phone){showToast('error','Заполните поля','Имя и номер обязательны');return;}
+    if(!phone.startsWith('+')){showToast('error','Формат номера','Номер должен начинаться с +');return;}
+    waCfg.recipients.push({name,phone,callmebotKey:''});
+    waSaveConfig(waCfg);
+    document.getElementById('newRecipientName').value='';
+    document.getElementById('newRecipientPhone').value='';
+    waRenderRecipients();
+  });
+  document.getElementById('refreshPreviewBtn').addEventListener('click',waRefreshPreview);
+  document.getElementById('tmplSummary').addEventListener('input',()=>{waCfg.tmplSummary=document.getElementById('tmplSummary').value;waRefreshPreview();});
+  document.getElementById('waSendNowBtn').addEventListener('click',waSendNow);
+  ['waModalClose','waModalCloseBtn'].forEach(id=>{
+    document.getElementById(id).addEventListener('click',()=>document.getElementById('waModal').classList.remove('show'));
+  });
+  document.getElementById('waSettingsBtn').addEventListener('click',()=>{
+    waLoadIntoModal();
+    document.getElementById('waModal').classList.add('show');
+  });
+}
+
+function waLoadIntoModal() {
+  document.getElementById('tmplSummary').value=waCfg.tmplSummary||WA_DEFAULT_SUMMARY;
+  document.getElementById('tmplAlert').value=waCfg.tmplAlert||WA_DEFAULT_ALERT;
+  document.getElementById('alertThreshold').value=waCfg.alertThreshold||10;
+  document.getElementById('autoSend').value=waCfg.autoSend||'both';
+  if(waCfg.twilio){document.getElementById('twilioSid').value=waCfg.twilio.sid||'';document.getElementById('twilioToken').value=waCfg.twilio.token||'';document.getElementById('twilioFrom').value=waCfg.twilio.from||'';}
+  if(waCfg.waba){document.getElementById('wabaPhoneId').value=waCfg.waba.phoneId||'';document.getElementById('wabaToken').value=waCfg.waba.token||'';}
+  document.querySelectorAll('.provider-card').forEach(c=>c.classList.remove('selected'));
+  const ac=document.querySelector(`.provider-card[data-provider="${waCfg.provider||'callmebot'}"]`);
+  if(ac) ac.classList.add('selected');
+  document.querySelectorAll('[id^="provider-"]').forEach(el=>el.style.display='none');
+  const pe=document.getElementById('provider-'+(waCfg.provider||'callmebot'));
+  if(pe) pe.style.display='block';
+  waRenderRecipients(); waRefreshPreview();
+}
+
+function waRenderRecipients() {
+  const list=document.getElementById('recipientsList');
+  const keysList=document.getElementById('callmebotKeysList');
+  if(!waCfg.recipients.length){
+    list.innerHTML='<div style="color:var(--muted);font-size:11px;padding:8px 0">Получатели не добавлены</div>';
+    keysList.innerHTML=''; return;
+  }
+  list.innerHTML=waCfg.recipients.map((r,i)=>`
+    <div class="recipient-row">
+      <div class="recipient-name">${r.name}</div>
+      <div class="recipient-phone">${r.phone}</div>
+      <button class="recipient-del" data-idx="${i}">✕</button>
+    </div>`).join('');
+  list.querySelectorAll('.recipient-del').forEach(btn=>{
+    btn.addEventListener('click',()=>{waCfg.recipients.splice(parseInt(btn.dataset.idx),1);waSaveConfig(waCfg);waRenderRecipients();});
+  });
+  document.getElementById('callmebotKeySection').style.display=waCfg.provider==='callmebot'?'block':'none';
+  keysList.innerHTML=waCfg.recipients.map((r,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="font-size:11px;min-width:100px">${r.name}</span>
+      <input class="form-input" style="flex:1" placeholder="API-ключ" value="${r.callmebotKey||''}"
+        oninput="waCfg.recipients[${i}].callmebotKey=this.value;waSaveConfig(waCfg)">
+    </div>`).join('');
+}
+
+function waRefreshPreview() {
+  waCfg.tmplSummary=document.getElementById('tmplSummary').value;
+  document.getElementById('msgPreview').textContent=waBuildSummary();
+}
+
+function waRenderSendTab() {
+  const sendList=document.getElementById('sendRecipientsList');
+  sendList.innerHTML=waCfg.recipients.map((r,i)=>`
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px">
+      <input type="checkbox" data-idx="${i}" checked style="accent-color:var(--accent)">
+      ${r.name} <span style="color:var(--muted);font-family:var(--mono);font-size:11px">${r.phone}</span>
+    </label>`).join('')||'<div style="color:var(--muted);font-size:11px">Нет получателей</div>';
+  const sendType=document.getElementById('sendType').value;
+  const preview=document.getElementById('sendPreview');
+  if(sendType==='summary'||sendType==='both'){preview.textContent=waBuildSummary();}
+  else{const alerts=waBuildAlerts();preview.textContent=alerts.length?alerts[0]:'Нет тревожных станций';}
+}
+
+document.getElementById('sendType').addEventListener('change',()=>{
+  if(document.getElementById('tab-send').classList.contains('active')) waRenderSendTab();
+});
+
+async function waSendNow() {
+  const btn=document.getElementById('waSendNowBtn');
+  const resultEl=document.getElementById('sendResult');
+  const sendType=document.getElementById('sendType').value;
+  const selected=[...document.querySelectorAll('#sendRecipientsList input[type=checkbox]:checked')]
+    .map(cb=>waCfg.recipients[parseInt(cb.dataset.idx)]).filter(Boolean);
+  if(!selected.length){showToast('error','Нет получателей','Выберите хотя бы одного');return;}
+  if(!STATIONS_DATA.length){showToast('error','Нет данных','Сначала загрузите Excel');return;}
+  btn.disabled=true;
+  document.getElementById('waSendBtnText').textContent='⏳ Отправка...';
+  resultEl.innerHTML='';
+  const messages=[];
+  if(sendType==='summary'||sendType==='both') messages.push({type:'summary',text:waBuildSummary()});
+  if(sendType==='alerts'||sendType==='both') waBuildAlerts().forEach(a=>messages.push({type:'alert',text:a}));
+  if(waCfg.provider==='callmebot'){
+    let ok=0,fail=0;
+    for(const r of selected){
+      if(!r.callmebotKey){resultEl.innerHTML+=`<div style="color:var(--yellow)">⚠️ ${r.name}: нет API-ключа</div>`;fail++;continue;}
+      for(const msg of messages){
+        const res=await waSendCallMeBot(r.phone,r.callmebotKey,msg.text);
+        resultEl.innerHTML+=res.ok
+          ?`<div style="color:var(--green)">✅ ${r.name} (${msg.type}): отправлено</div>`
+          :`<div style="color:var(--red)">❌ ${r.name}: ${res.error}</div>`;
+        res.ok?ok++:fail++;
+        await new Promise(x=>setTimeout(x,1000));
+      }
+    }
+    showToast(fail===0?'success':'warning','Отправка завершена',`Успешно: ${ok}, ошибок: ${fail}`);
+  } else {
+    const blob=new Blob([waGeneratePythonScript()],{type:'text/plain'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='whatsapp_sender.py';a.click();
+    URL.revokeObjectURL(url);
+    resultEl.innerHTML=`<div style="color:var(--accent)">📥 Скачан <b>whatsapp_sender.py</b> с вашими настройками.<br>
+Запустите: <code style="background:var(--panel);padding:2px 5px;border-radius:3px">python whatsapp_sender.py</code></div>`;
+    showToast('info','Python-скрипт скачан','Запустите whatsapp_sender.py на сервере');
+  }
+  btn.disabled=false;
+  document.getElementById('waSendBtnText').textContent='📤 Отправить сейчас';
+}
+
+function waAutoSendAfterLoad() {
+  const mode=waCfg.autoSend||'off';
+  if(mode==='off'||!waCfg.recipients.length) return;
+  setTimeout(async()=>{
+    const msgs=[];
+    if(mode==='summary'||mode==='both') msgs.push(waBuildSummary());
+    if(mode==='alerts'||mode==='both') waBuildAlerts().forEach(a=>msgs.push(a));
+    for(const r of waCfg.recipients){
+      if(waCfg.provider==='callmebot'&&r.callmebotKey){
+        for(const msg of msgs){
+          await waSendCallMeBot(r.phone,r.callmebotKey,msg);
+          await new Promise(x=>setTimeout(x,1000));
+        }
+      }
+    }
+    if(msgs.length) showToast('success','WhatsApp отправлен','Уведомления разосланы');
+  },2000);
+}
+
+</script>
+<!-- MOBILE BOTTOM NAV -->
+<nav class="mobile-bottom-nav" id="mobileBottomNav">
+  <button class="mbn-btn active" data-view="map" id="mbnMap">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+    <span>Карта</span>
+  </button>
+  <button class="mbn-btn" data-view="list" id="mbnList">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    <span>Станции</span>
+  </button>
+  <button class="mbn-btn" data-view="history" id="mbnHistory">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    <span>История</span>
+  </button>
+  <label class="mbn-btn" id="mbnUpload">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    <span>Загрузить</span>
+    <input type="file" id="fileInputMobile" accept=".xlsx,.xls" style="display:none">
+  </label>
+</nav>
+
+<!-- MOBILE BOTTOM SHEET (список станций) -->
+<div class="mobile-sheet" id="mobileSheet">
+  <div class="mobile-sheet-handle" id="mobileSheetHandle"></div>
+  <div class="mobile-sheet-content">
+    <div class="sidebar-header" style="border-bottom:1px solid var(--border);padding:10px 16px 10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="sidebar-title" style="margin:0">Станции (<span id="stationCountMobile">—</span>)</div>
+        <div style="display:flex;gap:6px;font-size:11px;font-family:var(--mono);color:var(--muted)">
+          <span>🚃 <strong id="mobileTotal" style="color:var(--text)">—</strong></span>
+          <span>🔴 <strong id="mobileMaxIdle" style="color:var(--red)">—</strong>д</span>
+        </div>
+      </div>
+      <input class="search-box" id="searchBoxMobile" type="text" placeholder="Поиск станции...">
+    </div>
+    <div class="filters" style="padding:8px 12px;gap:5px">
+      <button class="filter-btn active" data-filter-m="all">Все</button>
+      <button class="filter-btn" data-filter-m="loaded">Гружёные</button>
+      <button class="filter-btn" data-filter-m="empty">Порожние</button>
+    </div>
+    <div class="station-list" id="stationListMobile" style="flex:1;overflow-y:auto"></div>
+  </div>
+</div>
+<div class="mobile-sheet-overlay" id="mobileSheetOverlay"></div>
+<div class="modal-overlay" id="manualGeoModal">
+  <div class="modal" style="width:520px">
+    <div class="modal-header">
+      <div class="modal-header-icon">📍</div>
+      <div class="modal-title">Добавить координаты станций</div>
+      <button class="modal-close" id="manualGeoCloseBtn">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <div class="info-box" style="margin-bottom:14px">
+        OpenStreetMap не смог найти эти станции автоматически.<br>
+        Введите координаты вручную — они запомнятся и при следующих загрузках будут применяться автоматически.
+      </div>
+      <div class="form-hint" style="margin-bottom:10px">
+        Координаты можно найти на <a href="https://yandex.kz/maps" target="_blank" style="color:var(--accent)">Яндекс.Картах</a> или
+        <a href="https://www.google.com/maps" target="_blank" style="color:var(--accent)">Google Maps</a> — ПКМ по станции → «Что здесь?»
+      </div>
+      <div id="manualGeoList" style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="manualGeoSkipBtn">Пропустить</button>
+      <button class="btn btn-primary" id="manualGeoSaveBtn">💾 Сохранить и добавить на карту</button>
+    </div>
+  </div>
+</div>
+
+<!-- WHATSAPP MODAL -->
+<div class="modal-overlay" id="waModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-header-icon">💬</div>
+      <div class="modal-title">WhatsApp-уведомления</div>
+      <button class="modal-close" id="waModalClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="provider">Провайдер</button>
+        <button class="modal-tab" data-tab="recipients">Получатели</button>
+        <button class="modal-tab" data-tab="messages">Шаблоны</button>
+        <button class="modal-tab" data-tab="send">Отправить</button>
+      </div>
+
+      <!-- TAB: PROVIDER -->
+      <div class="modal-tab-content active" id="tab-provider">
+        <div class="provider-cards">
+          <div class="provider-card selected" data-provider="callmebot">
+            <div class="provider-card-icon">🆓</div>
+            <div class="provider-card-name">CallMeBot</div>
+            <div class="provider-card-desc">Бесплатно · Быстрый старт</div>
+          </div>
+          <div class="provider-card" data-provider="twilio">
+            <div class="provider-card-icon">💰</div>
+            <div class="provider-card-name">Twilio</div>
+            <div class="provider-card-desc">Платно · Надёжно · API</div>
+          </div>
+          <div class="provider-card" data-provider="waba">
+            <div class="provider-card-icon">🏢</div>
+            <div class="provider-card-name">WhatsApp Business API</div>
+            <div class="provider-card-desc">Официально · Для компаний</div>
+          </div>
+        </div>
+
+        <!-- CallMeBot settings -->
+        <div id="provider-callmebot">
+          <div class="info-box">
+            <strong>CallMeBot — бесплатный способ отправки в WhatsApp</strong><br>
+            Каждый получатель должен активировать бота один раз — написать в WhatsApp боту и получить API-ключ.
+          </div>
+          <div class="step-list">
+            <div class="step-item"><div class="step-num">1</div><div>Добавьте номер +34 644 59 67 47 в контакты (CallMeBot)</div></div>
+            <div class="step-item"><div class="step-num">2</div><div>Напишите этому контакту: <code style="background:var(--panel2);padding:2px 5px;border-radius:3px">I allow callmebot to send me messages</code></div></div>
+            <div class="step-item"><div class="step-num">3</div><div>Через минуту получите API-ключ в ответном сообщении</div></div>
+            <div class="step-item"><div class="step-num">4</div><div>Добавьте получателей на вкладке «Получатели»</div></div>
+          </div>
+        </div>
+
+        <!-- Twilio settings -->
+        <div id="provider-twilio" style="display:none">
+          <div class="info-box">
+            <strong>Twilio WhatsApp API</strong> — надёжный коммерческий провайдер.<br>
+            Регистрация: <a href="https://www.twilio.com/try-twilio" target="_blank">twilio.com</a> · Sandbox для тестирования бесплатный.
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Account SID</label>
+              <input class="form-input" id="twilioSid" placeholder="ACxxxxxxxxxxxxxxxx" type="password">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Auth Token</label>
+              <input class="form-input" id="twilioToken" placeholder="xxxxxxxxxxxxxxxx" type="password">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">От кого (Twilio номер)</label>
+            <input class="form-input" id="twilioFrom" placeholder="+14155238886">
+            <div class="form-hint">Формат: whatsapp:+14155238886 (Twilio Sandbox) или ваш одобренный номер</div>
+          </div>
+          <div class="warn-box">⚠️ Twilio-запросы идут через backend-сервер. Для работы прямо из браузера используйте Python-скрипт <code>whatsapp_sender.py</code></div>
+        </div>
+
+        <!-- WABA settings -->
+        <div id="provider-waba" style="display:none">
+          <div class="info-box">
+            <strong>WhatsApp Business API (Meta)</strong> — официальный корпоративный канал.<br>
+            Требует верификацию бизнеса в Meta. Подходит при объёмах 100+ сообщений/день.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Phone Number ID</label>
+            <input class="form-input" id="wabaPhoneId" placeholder="123456789012345">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Access Token</label>
+            <input class="form-input" id="wabaToken" placeholder="EAAxxxxxxx..." type="password">
+          </div>
+          <div class="warn-box">⚠️ WABA также требует backend. Используйте <code>whatsapp_sender.py</code> для интеграции.</div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn btn-primary" id="saveProviderBtn">💾 Сохранить настройки</button>
+        </div>
+      </div>
+
+      <!-- TAB: RECIPIENTS -->
+      <div class="modal-tab-content" id="tab-recipients">
+        <div class="recipients-list" id="recipientsList"></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input class="form-input" id="newRecipientName" placeholder="Имя (напр: Алексей)" style="flex:1">
+          <input class="form-input" id="newRecipientPhone" placeholder="+77001234567" style="flex:1.2">
+          <button class="btn btn-primary btn-sm" id="addRecipientBtn">+ Добавить</button>
+        </div>
+        <div class="form-hint">Номер в формате +7XXXXXXXXXX (Казахстан) или +998XXXXXXXXX (Узбекистан)</div>
+        <div class="form-hint" style="margin-top:6px">Для CallMeBot: у каждого получателя должен быть свой API-ключ после активации бота</div>
+        <div id="callmebotKeySection" style="margin-top:12px;display:none">
+          <div class="form-label">API-ключи CallMeBot (по одному на получателя)</div>
+          <div id="callmebotKeysList"></div>
+        </div>
+      </div>
+
+      <!-- TAB: MESSAGES -->
+      <div class="modal-tab-content" id="tab-messages">
+        <div class="form-group">
+          <label class="form-label">Шаблон — сводка (отправляется 2x в день)</label>
+          <textarea class="form-textarea" id="tmplSummary" style="min-height:120px"></textarea>
+          <div class="form-hint">Переменные: {date} {time} {total} {loaded} {empty} {max_idle} {avg_idle} {stations} {top3}</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Шаблон — алерт (при макс.простой ≥ порог)</label>
+          <textarea class="form-textarea" id="tmplAlert" style="min-height:100px"></textarea>
+          <div class="form-hint">Переменные: {station} {count} {max_idle} {wagons_list}</div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Порог алерта (дней простоя)</label>
+            <input class="form-input" id="alertThreshold" type="number" min="1" max="365" value="10">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Авто-отправка при загрузке</label>
+            <select class="form-select" id="autoSend">
+              <option value="both">Всегда (сводка + алерты)</option>
+              <option value="alerts">Только алерты</option>
+              <option value="summary">Только сводка</option>
+              <option value="off">Выключено</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Предпросмотр сводки</label>
+          <div class="msg-preview" id="msgPreview">Загрузите Excel для предпросмотра</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="refreshPreviewBtn">🔄 Обновить предпросмотр</button>
+      </div>
+
+      <!-- TAB: SEND -->
+      <div class="modal-tab-content" id="tab-send">
+        <div class="form-group">
+          <label class="form-label">Тип сообщения</label>
+          <select class="form-select" id="sendType">
+            <option value="summary">📊 Сводка по всем станциям</option>
+            <option value="alerts">🔴 Только тревожные станции</option>
+            <option value="both">📊 + 🔴 Оба сообщения</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Получатели</label>
+          <div id="sendRecipientsList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Предпросмотр</label>
+          <div class="msg-preview" id="sendPreview">—</div>
+        </div>
+        <div id="sendResult" style="margin-top:10px;font-size:11px;font-family:var(--mono)"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="waModalCloseBtn">Закрыть</button>
+      <button class="btn btn-green" id="waSendNowBtn">
+        <span id="waSendBtnText">📤 Отправить сейчас</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Инициализация после загрузки всего DOM
+waInitModal();
+initMobileNav();
+</script>
+
+</body>
+</html>
